@@ -1,0 +1,6 @@
+credentials.json
+_scrap.py
+pyrightconfig.json
+
+*.pyc
+__pycache__
