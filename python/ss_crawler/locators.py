@@ -1,6 +1,10 @@
 from selenium.webdriver.common.by import By
 
 
+class PageLocators(object):
+    BODY = (By.TAG_NAME, "body")
+
+
 class MainPageLocators(object):
     LOGIN_BUTTON = (By.LINK_TEXT, "Login")
 
@@ -41,8 +45,12 @@ class ReviewItemLocators(object):
     ORDER_CELL = (By.CSS_SELECTOR,
                   "td.el-table__cell.handle-cell>div.cell>div")
     NAME_CELL = (By.CSS_SELECTOR, "td.el-table__cell div.name-text")
+    UPLOADED_CELL = (By.CSS_SELECTOR,
+                     "td:nth-child(6).el-table__cell>div.cell")
+    BY_CELL = (By.CSS_SELECTOR,
+               "td:nth-child(7).el-table__cell>div.cell>div>a")
     VIEWS_CELL = (By.CSS_SELECTOR,
-                  "td:nth-child(8).el-table__cell>div.cell>div")
+                  "td:nth-child(8).el-table__cell>div.cell")
     NOTES_CELL = (By.CSS_SELECTOR,
                   "td:nth-child(9).el-table__cell>div.cell>div")
     SIZE_CELL = (By.CSS_SELECTOR,
@@ -56,4 +64,4 @@ class ReviewItemLocators(object):
 class PopOverMenuLocators(object):
     POPOVER = (By.CSS_SELECTOR, "div.popover")
     POPOVER_ITEM = (By.CSS_SELECTOR, "div.flex")
-    POPOVER_DL_ITEM_NAME = (By.CSS_SELECTOR, "i.ti-download>span")
+    POPOVER_DL_ITEM_NAME = (By.CSS_SELECTOR, "i.ti-download+span")

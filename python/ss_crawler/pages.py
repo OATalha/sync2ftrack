@@ -1,23 +1,30 @@
 from fnmatch import fnmatch
-from typing import Optional
+from typing import Optional, Any
+import datetime
 
-from selenium.webdriver import ActionChains
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+
 from .locators import (
     MainPageLocators,
     LoginPageLocators,
+    PageLocators,
+    PopOverMenuLocators,
     ProjectPageLocators,
     ReviewItemLocators,
     ReviewLocators,
 )
+
+
 from .elements import (
     SimpleElement,
     SimpleSubPageElement,
+    SubPageRootElement,
     WaitedElement,
     WaitedElements,
     WaitedSubPageElement,
@@ -25,22 +32,85 @@ from .elements import (
 )
 
 
-class BasePage(object):
+class Page(object):
+    main_scroller = SimpleElement(PageLocators.BODY)
+
     def __init__(self, driver: WebDriver):
         self.driver = driver
         assert self.verify()
 
+    @property
+    def scroll_height(self):
+        return int(self.main_scroller.get_attribute('scrollHeight'))
+
+    @property
+    def scroll_top(self):
+        return int(self.main_scroller.get_attribute('scrollTop'))
+
     def verify(self) -> bool:
         return True
 
+    def wait_until_scroll_height_changed(self, scroll_height, wait: int = 5):
+        def scrollHeightChanged(_):
+            currentScrollHeight = int(
+                self.main_scroller.get_attribute("scrollHeight")
+            )
+            return currentScrollHeight != scroll_height
+        try:
+            WebDriverWait(self.driver, wait).until(scrollHeightChanged)
+        except TimeoutException:
+            return False
+        return True
 
-class BaseSubPage(BasePage):
-    def __init__(self, driver: WebDriver, root_element: WebElement):
-        self.driver = driver
+    def scroll_to(self, height: int):
+        script = "arguments[0].scrollTo(0, arguments[1])"
+        self.driver.execute_script(script, self.main_scroller, height)
+        return self.scroll_top
+
+
+class SubPage(Page):
+    def __init__(
+        self, parent_page: Page, root_element: WebElement
+    ):
+        self.parent_page = parent_page
         self.root_element = root_element
 
+    @property
+    def driver(self) -> WebDriver:
+        return self.parent_page.driver
 
-class MainPage(BasePage):
+    def move_mouse_to(self) -> bool:
+        self.scroll_to_view()
+        actions = ActionBuilder(self.driver)
+        actions.pointer_action.move_to_location(*self.get_mid_point())
+        actions.perform()
+        return True
+
+    def scroll_to_top(self):
+        scroll_height = self.parent_page.scroll_height
+        self.driver.execute_script("arguments[0].scrollIntoView(true)",
+                                   self.root_element)
+        self.parent_page.wait_until_scroll_height_changed(scroll_height)
+
+    def scroll_to_view(self):
+        scroll_height = self.parent_page.scroll_height
+        self.driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true)",
+                                   self.root_element)
+        self.parent_page.wait_until_scroll_height_changed(scroll_height)
+
+    def get_rect(self) -> dict[str, float]:
+        location = self.driver.execute_script(
+                "return arguments[0].getBoundingClientRect();",
+                self.root_element)
+        return location
+
+    def get_mid_point(self) -> tuple[int, int]:
+        rect = self.get_rect()
+        return (int(rect["x"] + rect["width"]/2),
+                int(rect["y"] + rect["height"]/2))
+
+
+class MainPage(Page):
     login_button = SimpleElement(MainPageLocators.LOGIN_BUTTON)
 
     def verify(self) -> bool:
@@ -50,7 +120,7 @@ class MainPage(BasePage):
         self.login_button.click()
 
 
-class LoginPage(BasePage):
+class LoginPage(Page):
 
     email_field = SimpleElement(LoginPageLocators.EMAIL_FIELD)
     password_field = WaitedElement(LoginPageLocators.PASSWORD_FIELD)
@@ -67,7 +137,7 @@ class LoginPage(BasePage):
         self.login_button.click()
 
 
-class ProjectPage(BasePage):
+class ProjectPage(Page):
     workspace_title = WaitedElement(ProjectPageLocators.WORKSPACE_NAME)
     project_title = WaitedElement(ProjectPageLocators.PROJECT_NAME)
     main_scroller = WaitedElement(ProjectPageLocators.MAIN_SCROLLER)
@@ -76,27 +146,10 @@ class ProjectPage(BasePage):
     def verify(self) -> bool:
         return bool(self.project_title.text)
 
-    def scroll_to(self, scrollHeight: int):
-        script = 'document.getElementById("{}").scrollTo(0, {})'.format(
-            ProjectPageLocators.MAIN_SCROLLER[1], scrollHeight
-        )
-        self.driver.execute_script(script)
-
     def scroll_once(self, wait: int = 5) -> bool:
-        scrollHeight = int(self.main_scroller.get_attribute("scrollHeight"))
-        self.scroll_to(scrollHeight)
-
-        def scrollHeightChanged(_):
-            currentScrollHeight = int(
-                self.main_scroller.get_attribute("scrollHeight")
-            )
-            return currentScrollHeight != scrollHeight
-
-        try:
-            WebDriverWait(self.driver, wait).until(scrollHeightChanged)
-        except TimeoutException:
-            return False
-
+        scroll_height = int(self.main_scroller.get_attribute("scrollHeight"))
+        self.scroll_to(scroll_height)
+        self.wait_until_scroll_height_changed(scroll_height, 5)
         return True
 
     def scroll_to_end(self, max_scrolls: Optional[int] = None, wait: int = 5):
@@ -108,13 +161,13 @@ class ProjectPage(BasePage):
                     break
 
     def get_reviews(self) -> list["Review"]:
-        return [Review(self.driver, element) for element in self.reviews]
+        return [Review(self, element) for element in self.reviews]
 
     def get_review(
         self, id: Optional[str] = None, name: Optional[str] = None
     ) -> Optional["Review"]:
-        if not any(x is None for x in [id, name]):
-            raise ValueError("Please provide either 'id' or 'name'")
+        if id is None and name is None:
+            raise TypeError("Please provide either 'id' or 'name'")
         for review in self.get_reviews():
             if id is not None:
                 if fnmatch(review.get_id(), id):
@@ -123,15 +176,10 @@ class ProjectPage(BasePage):
                 if fnmatch(review.get_name(), name):
                     return review
 
-    def scroll_to_element(self, element: WebElement):
-        re_top = int(element.get_attribute("offsetTop"))
-        sc_top = int(self.main_scroller.get_attribute("offsetTop"))
-        self.scroll_to(abs(re_top - sc_top))
 
-
-class Review(BaseSubPage):
+class Review(SubPage):
     expand_button = SimpleSubPageElement(ReviewLocators.EXPAND_BUTTON)
-    download_button = WaitedSubPageElement(ReviewLocators.DL_BUTTON)
+    download_button = WaitedSubPageElement(ReviewLocators.DL_BUTTON, 2)
     switch_button = WaitedSubPageElement(ReviewLocators.SWITCH_BUTTON)
     details_div = SimpleSubPageElement(ReviewLocators.DETAILS_DIV)
     details_table = SimpleSubPageElement(ReviewLocators.DETAILS_TABLE)
@@ -146,11 +194,6 @@ class Review(BaseSubPage):
             *(ReviewLocators.REVIEW_NAME)
         )
         return review_name.text
-
-    def hover(self):
-        actions = ActionChains(self.driver)
-        actions.move_to_element(self.root_element)
-        actions.perform()
 
     def is_expanded(self, _=None) -> bool:
         try:
@@ -176,6 +219,7 @@ class Review(BaseSubPage):
         return False
 
     def expand(self, wait: int = 1) -> bool:
+        self.scroll_to_top()
         if not self.is_expanded():
             self.expand_button.click()
             try:
@@ -199,7 +243,6 @@ class Review(BaseSubPage):
         self.expand()
         if not self.has_details_table():
             self.switch_button.click()
-            print('switch requested!')
             try:
                 WebDriverWait(self.driver, wait).until(self.has_details_table)
             except TimeoutException:
@@ -207,24 +250,51 @@ class Review(BaseSubPage):
         return True
 
     def get_review_items(self):
+        self.show_details_table()
         return [
-            ReviewItem(self.driver, element) for element in self.review_items
+            ReviewItem(self.parent_page, element)
+            for element in self.review_items
         ]
 
+    def download_csv(self, max_tries=5):
+        attempts = 0
+        while True:
+            try:
+                self.move_mouse_to()
+                self.download_button.click()
+                break
+            except TimeoutException:
+                attempts += 1
+                if attempts >= max_tries:
+                    raise
+        menu = PopOverMenu(self.parent_page)
+        item = menu.get_download_item_by_text("*CSV*")
+        item.click()
+        # await download
 
-class ReviewItem(BaseSubPage):
+    def download_sketches(self):
+        pass
+
+
+class ReviewItem(SubPage):
     order_cell = SimpleSubPageElement(ReviewItemLocators.ORDER_CELL)
     name_cell = SimpleSubPageElement(ReviewItemLocators.NAME_CELL)
+    by_cell = SimpleSubPageElement(ReviewItemLocators.BY_CELL)
+    uploaded_cell = SimpleSubPageElement(ReviewItemLocators.UPLOADED_CELL)
     notes_cell = SimpleSubPageElement(ReviewItemLocators.NOTES_CELL)
+    views_cell = SimpleSubPageElement(ReviewItemLocators.VIEWS_CELL)
     size_cell = SimpleSubPageElement(ReviewItemLocators.SIZE_CELL)
     type_cell = SimpleSubPageElement(ReviewItemLocators.TYPE_CELL)
-    dl_button = SimpleSubPageElement(ReviewItemLocators.DL_BUTTON)
+    download_button = WaitedSubPageElement(ReviewItemLocators.DL_BUTTON, 2)
 
     def get_order(self):
         return int(self.order_cell.text)
 
     def get_name(self):
         return self.name_cell.get_dom_attribute("title")
+
+    def get_views(self):
+        return int(self.views_cell.text)
 
     def get_notes(self):
         return int(self.notes_cell.text)
@@ -235,6 +305,75 @@ class ReviewItem(BaseSubPage):
     def get_type(self):
         return self.type_cell.text
 
+    def get_user(self):
+        return self.by_cell.text
 
-class PopOverMenu(BaseSubPage):
-    pass
+    def get_upload_time(self):
+        text = self.uploaded_cell.text
+        return datetime.datetime.strptime(text, '%m/%d/%y %I:%M %p')
+
+    def get_data(self) -> dict[str, Any]:
+        return {
+            "order": self.get_order(),
+            "name": self.get_name(),
+            "views": self.get_views(),
+            "notes": self.get_notes(),
+            "size": self.get_size(),
+            "type": self.get_type(),
+            "user": self.get_user(),
+            "upload_time": self.get_upload_time()
+        }
+
+    def initiate_download(self, text, max_tries=5):
+        attempts = 0
+        while True:
+            try:
+                self.move_mouse_to()
+                self.download_button.click()
+                break
+            except TimeoutException:
+                attempts += 1
+                if attempts >= max_tries:
+                    raise
+        popovermenu = PopOverMenu(self.parent_page)
+        item = popovermenu.get_download_item_by_text(text)
+        item.click()
+
+    def download_original(self, max_tries=2):
+        item_text = "*Original*"
+        self.initiate_download(item_text, max_tries=max_tries)
+        return self.get_name().lower()
+
+    def download_transcoded(self, max_tries=2):
+        item_text = "*Transcoded*"
+        self.initiate_download(item_text, max_tries=max_tries)
+        return self.get_name().lower()
+
+
+class PopOverMenu(SubPage):
+    root_element = SubPageRootElement(PopOverMenuLocators.POPOVER)
+    items = WaitedSubPageElements(PopOverMenuLocators.POPOVER_ITEM)
+
+    def __init__(self, parent_page: Page):
+        super().__init__(parent_page, None)  # type: ignore
+
+    def verify(self) -> bool:
+        try:
+            return self.root_element.is_displayed()
+        except TimeoutException:
+            return False
+
+    def get_download_item_by_text(self, match_text: str) -> WebElement:
+        for element in self.items:
+            try:
+                item_name = element.find_element(
+                    *(PopOverMenuLocators.POPOVER_DL_ITEM_NAME)
+                ).text
+            except NoSuchElementException:
+                # Not a download item
+                continue
+            if fnmatch(item_name, match_text):
+                return element
+        raise NoSuchElementException(
+            f"Cannot find download item with {match_text}"
+        )

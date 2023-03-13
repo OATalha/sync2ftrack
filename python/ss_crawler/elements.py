@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -6,14 +6,14 @@ from selenium.webdriver.remote.webelement import WebElement
 
 
 if TYPE_CHECKING:
-    from .pages import BasePage, BaseSubPage
+    from .pages import Page, SubPage
 
 
 class SimpleElement(object):
     def __init__(self, locator: tuple[str, str]):
         self.locator = locator
 
-    def __get__(self, obj: "BasePage", owner: type["BasePage"]) -> WebElement:
+    def __get__(self, obj: "Page", owner: type["Page"]) -> WebElement:
         element = obj.driver.find_element(*(self.locator))
         return element
 
@@ -23,7 +23,7 @@ class WaitedElement(SimpleElement):
         super().__init__(locator)
         self.wait = wait
 
-    def __get__(self, obj: "BasePage", owner: type["BasePage"]) -> WebElement:
+    def __get__(self, obj: "Page", owner: type["Page"]) -> WebElement:
         element = WebDriverWait(obj.driver, self.wait).until(
             EC.visibility_of_element_located(self.locator)
         )
@@ -32,11 +32,11 @@ class WaitedElement(SimpleElement):
 
 class WaitedElements(WaitedElement):
     def __get__(
-        self, obj: "BasePage", owner: type["BasePage"]
+        self, obj: "Page", owner: type["Page"]
     ) -> list[WebElement]:
         try:
             WebDriverWait(obj.driver, self.wait).until(
-                EC.visibility_of_element_located(self.locator)
+                EC.presence_of_element_located(self.locator)
             )
         except TimeoutException:
             pass
@@ -46,31 +46,39 @@ class WaitedElements(WaitedElement):
 
 class SimpleSubPageElement(SimpleElement):
     def __get__(
-        self, obj: "BaseSubPage", owner: type["BaseSubPage"]
+        self, obj: "SubPage", owner: type["SubPage"]
     ) -> WebElement:
-        element = obj.root_element.find_element(*(self.locator))
+        driver = obj.root_element or obj.driver
+        element = driver.find_element(*(self.locator))
         return element
 
 
 class WaitedSubPageElement(WaitedElement):
     def __get__(
-        self, obj: "BaseSubPage", owner: type["BaseSubPage"]
+        self, obj: "SubPage", owner: type["SubPage"]
     ) -> WebElement:
-        element = WebDriverWait(obj.root_element, self.wait).until(
+        driver = obj.root_element or obj.driver
+        element = WebDriverWait(driver, self.wait).until(
             EC.visibility_of_element_located(self.locator)
         )
         return element
 
 
+class SubPageRootElement(WaitedElement):
+    def __set__(self, obj: "SubPage", value: Union[WebElement, None]):
+        pass
+
+
 class WaitedSubPageElements(WaitedElement):
     def __get__(
-        self, obj: "BaseSubPage", owner: type["BaseSubPage"]
+        self, obj: "SubPage", owner: type["SubPage"]
     ) -> list[WebElement]:
+        driver = obj.root_element or obj.driver
         try:
-            WebDriverWait(obj.root_element, self.wait).until(
-                EC.visibility_of_element_located(self.locator)
+            WebDriverWait(driver, self.wait).until(
+                EC.presence_of_element_located(self.locator)
             )
         except TimeoutException:
             pass
-        elements = obj.root_element.find_elements(*(self.locator))
+        elements = driver.find_elements(*(self.locator))
         return elements
