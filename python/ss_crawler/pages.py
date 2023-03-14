@@ -7,10 +7,10 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 
 from .locators import (
+    DownloadDialogLocators,
     MainPageLocators,
     LoginPageLocators,
     PageLocators,
@@ -41,11 +41,11 @@ class Page(object):
 
     @property
     def scroll_height(self):
-        return int(self.main_scroller.get_attribute('scrollHeight'))
+        return int(self.main_scroller.get_attribute("scrollHeight"))
 
     @property
     def scroll_top(self):
-        return int(self.main_scroller.get_attribute('scrollTop'))
+        return int(self.main_scroller.get_attribute("scrollTop"))
 
     def verify(self) -> bool:
         return True
@@ -56,6 +56,7 @@ class Page(object):
                 self.main_scroller.get_attribute("scrollHeight")
             )
             return currentScrollHeight != scroll_height
+
         try:
             WebDriverWait(self.driver, wait).until(scrollHeightChanged)
         except TimeoutException:
@@ -69,9 +70,7 @@ class Page(object):
 
 
 class SubPage(Page):
-    def __init__(
-        self, parent_page: Page, root_element: WebElement
-    ):
+    def __init__(self, parent_page: Page, root_element: WebElement):
         self.parent_page = parent_page
         self.root_element = root_element
 
@@ -80,7 +79,7 @@ class SubPage(Page):
         return self.parent_page.driver
 
     def move_mouse_to(self) -> bool:
-        self.scroll_to_view()
+        self.scroll_to_top()
         actions = ActionBuilder(self.driver)
         actions.pointer_action.move_to_location(*self.get_mid_point())
         actions.perform()
@@ -88,26 +87,30 @@ class SubPage(Page):
 
     def scroll_to_top(self):
         scroll_height = self.parent_page.scroll_height
-        self.driver.execute_script("arguments[0].scrollIntoView(true)",
-                                   self.root_element)
+        self.driver.execute_script(
+            "arguments[0].scrollIntoView(true)", self.root_element
+        )
         self.parent_page.wait_until_scroll_height_changed(scroll_height)
 
     def scroll_to_view(self):
         scroll_height = self.parent_page.scroll_height
-        self.driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true)",
-                                   self.root_element)
+        self.driver.execute_script(
+            "arguments[0].scrollIntoViewIfNeeded(true)", self.root_element
+        )
         self.parent_page.wait_until_scroll_height_changed(scroll_height)
 
     def get_rect(self) -> dict[str, float]:
         location = self.driver.execute_script(
-                "return arguments[0].getBoundingClientRect();",
-                self.root_element)
+            "return arguments[0].getBoundingClientRect();", self.root_element
+        )
         return location
 
     def get_mid_point(self) -> tuple[int, int]:
         rect = self.get_rect()
-        return (int(rect["x"] + rect["width"]/2),
-                int(rect["y"] + rect["height"]/2))
+        return (
+            int(rect["x"] + rect["width"] / 2),
+            int(rect["y"] + rect["height"] / 2),
+        )
 
 
 class MainPage(Page):
@@ -149,7 +152,7 @@ class ProjectPage(Page):
     def scroll_once(self, wait: int = 5) -> bool:
         scroll_height = int(self.main_scroller.get_attribute("scrollHeight"))
         self.scroll_to(scroll_height)
-        self.wait_until_scroll_height_changed(scroll_height, 5)
+        self.wait_until_scroll_height_changed(scroll_height, wait)
         return True
 
     def scroll_to_end(self, max_scrolls: Optional[int] = None, wait: int = 5):
@@ -200,7 +203,6 @@ class Review(SubPage):
             return self.details_div.is_displayed()
         except NoSuchElementException:
             return False
-        return True
 
     def has_details_grid(self, _=None) -> bool:
         if self.is_expanded():
@@ -256,7 +258,7 @@ class Review(SubPage):
             for element in self.review_items
         ]
 
-    def download_csv(self, max_tries=5):
+    def request_download(self, text, max_tries: int = 5):
         attempts = 0
         while True:
             try:
@@ -268,12 +270,26 @@ class Review(SubPage):
                 if attempts >= max_tries:
                     raise
         menu = PopOverMenu(self.parent_page)
-        item = menu.get_download_item_by_text("*CSV*")
+        item = menu.get_download_item_by_text(text)
         item.click()
+
+    def download_csv(self, max_tries=5):
+        self.request_download("*CSV", max_tries=max_tries)
         # await download
 
-    def download_sketches(self):
-        pass
+    def download_sketches(self, wait: int = 5, max_tries: int = 5):
+        self.request_download("*.Zip", max_tries=max_tries)
+        diag = DownloadDialog(self.parent_page)
+        attempts = 0
+        while True:
+            try:
+                WebDriverWait(self.driver, wait).until(diag.download_ready)
+                break
+            except TimeoutException:
+                attempts += 1
+                if attempts >= max_tries:
+                    raise
+        diag.begin_download()
 
 
 class ReviewItem(SubPage):
@@ -310,7 +326,7 @@ class ReviewItem(SubPage):
 
     def get_upload_time(self):
         text = self.uploaded_cell.text
-        return datetime.datetime.strptime(text, '%m/%d/%y %I:%M %p')
+        return datetime.datetime.strptime(text, "%m/%d/%y %I:%M %p")
 
     def get_data(self) -> dict[str, Any]:
         return {
@@ -321,7 +337,7 @@ class ReviewItem(SubPage):
             "size": self.get_size(),
             "type": self.get_type(),
             "user": self.get_user(),
-            "upload_time": self.get_upload_time()
+            "upload_time": self.get_upload_time(),
         }
 
     def initiate_download(self, text, max_tries=5):
@@ -372,8 +388,34 @@ class PopOverMenu(SubPage):
             except NoSuchElementException:
                 # Not a download item
                 continue
-            if fnmatch(item_name, match_text):
+            if fnmatch(item_name.strip(), match_text):
                 return element
         raise NoSuchElementException(
             f"Cannot find download item with {match_text}"
         )
+
+
+class DownloadDialog(SubPage):
+    root_element = SubPageRootElement(DownloadDialogLocators.DIALOG)
+    body = SimpleSubPageElement(DownloadDialogLocators.BODY)
+    download_link = SimpleSubPageElement(DownloadDialogLocators.DOWNLOAD_LINK)
+
+    def __init__(self, parent_page: Page):
+        super().__init__(parent_page, None)  # type: ignore
+
+    def download_ready(self, _) -> bool:
+        if self.get_body_text().startswith("Ready"):
+            return True
+        return False
+
+    def is_working(self, _):
+        if "Please wait" in self.get_body_text():
+            return True
+        return False
+
+    def get_body_text(self) -> str:
+        print("body text: ", self.body.text)
+        return self.body.text.strip()
+
+    def begin_download(self):
+        self.download_link.click()

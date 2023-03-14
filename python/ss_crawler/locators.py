@@ -65,3 +65,11 @@ class PopOverMenuLocators(object):
     POPOVER = (By.CSS_SELECTOR, "div.popover")
     POPOVER_ITEM = (By.CSS_SELECTOR, "div.flex")
     POPOVER_DL_ITEM_NAME = (By.CSS_SELECTOR, "i.ti-download+span")
+
+
+class DownloadDialogLocators(object):
+    DIALOG = (By.CSS_SELECTOR, "div.downloadDialog")
+    TITLE = (By.CSS_SELECTOR, "div.el-dialog__header>span.el-dialog__title")
+    BODY = (By.CSS_SELECTOR, "div.el-dialog__body")
+    DOWNLOAD_LINK = (By.CSS_SELECTOR, "div.el-dialog__body>div>div>a")
+

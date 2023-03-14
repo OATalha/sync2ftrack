@@ -1,5 +1,4 @@
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, WebDriverException
 import os
 import sys
 import time
@@ -28,7 +27,7 @@ def simple_login():
     driver = webdriver.Chrome()
     driver.get(syncsketch)
     main_page = MainPage(driver)
-    main_page.click_login_button()
+    main_page.goto_login_page()
     login_page = LoginPage(driver)
     login_page.login(credentials["email"], credentials["password"])
     project_page = ProjectPage(driver)
@@ -61,7 +60,6 @@ def list_reviews(driver):
     print("\nSingle Review:")
     if review is not None:
         print(review.get_name())
-        project_page.scroll_to_element(review.root_element)
         review.show_details_table()
         time.sleep(5)
         for ri in review.get_review_items():
@@ -89,7 +87,9 @@ def download_review(driver, rid: str = "review_2479559"):
         return
     print(review.get_name())
     print('Attempting csv download ...')
-    # review.download_csv()
+    review.download_csv()
+    print('Attempting sketches download ... ')
+    review.download_sketches()
     for ri in review.get_review_items():
         print((
             "Attempting ReviewItem Download - "
@@ -108,6 +108,7 @@ def scroll_review(driver, rid: str = 'review_2462537'):
         print("Review NOT Found!")
         return
     review.download_csv()
+    review.download_sketches()
     count = 0
     for ri in review.get_review_items():
         count += 1
