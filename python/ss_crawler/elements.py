@@ -31,9 +31,7 @@ class WaitedElement(SimpleElement):
 
 
 class WaitedElements(WaitedElement):
-    def __get__(
-        self, obj: "Page", owner: type["Page"]
-    ) -> list[WebElement]:
+    def __get__(self, obj: "Page", owner: type["Page"]) -> list[WebElement]:
         try:
             WebDriverWait(obj.driver, self.wait).until(
                 EC.presence_of_element_located(self.locator)
@@ -45,18 +43,14 @@ class WaitedElements(WaitedElement):
 
 
 class SimpleSubPageElement(SimpleElement):
-    def __get__(
-        self, obj: "SubPage", owner: type["SubPage"]
-    ) -> WebElement:
+    def __get__(self, obj: "SubPage", owner: type["SubPage"]) -> WebElement:
         driver = obj.root_element or obj.driver
         element = driver.find_element(*(self.locator))
         return element
 
 
 class WaitedSubPageElement(WaitedElement):
-    def __get__(
-        self, obj: "SubPage", owner: type["SubPage"]
-    ) -> WebElement:
+    def __get__(self, obj: "SubPage", owner: type["SubPage"]) -> WebElement:
         driver = obj.root_element or obj.driver
         element = WebDriverWait(driver, self.wait).until(
             EC.visibility_of_element_located(self.locator)
