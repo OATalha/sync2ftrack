@@ -7,20 +7,20 @@ import json
 
 
 from ss_crawler.pages import MainPage, LoginPage, ProjectPage
+from webdriver_utils import get_chrome_driver, get_credentials
 
-
-syncsketch = "https://syncsketch.com"
-
-minibods_syncsketch = "https://syncsketch.com/pro/#/project/195895"
-
-with open("../credentials.json") as _cred:
-    credentials = json.load(_cred)
-
-review_id = "review_2451728"
 
 os.environ["PATH"] += os.pathsep + os.path.abspath(
     f"../drivers/{sys.platform}"
 )
+
+syncsketch = "https://syncsketch.com"
+
+
+credentials = get_credentials()
+minibods_syncsketch = credentials["url"]
+
+review_id = "*2451728"
 
 
 def simple_login():
@@ -37,8 +37,8 @@ def simple_login():
 
 
 def load_project_page(driver) -> ProjectPage:
-    driver.get(minibods_syncsketch)
     driver.maximize_window()
+    driver.get(credentials["url"])
 
     login_page = LoginPage(driver)
     login_page.login(credentials["email"], credentials["password"])
@@ -47,8 +47,6 @@ def load_project_page(driver) -> ProjectPage:
 
 
 def list_reviews(driver):
-    driver = webdriver.Chrome()
-
     project_page = load_project_page(driver)
     print(project_page.project_title.text)
     project_page.scroll_to_end()
@@ -78,7 +76,7 @@ def list_reviews(driver):
 
 
 def download_review(driver, rid: str = "review_2479559"):
-    project_page = load_project_page(driver)
+    project_page = ProjectPage(driver)
     project_page.scroll_to_end(max_scrolls=1)
     time.sleep(5)
     review = project_page.get_review(rid)
@@ -86,22 +84,25 @@ def download_review(driver, rid: str = "review_2479559"):
         print("Review NOT Found!")
         return
     print(review.get_name())
-    print('Attempting csv download ...')
+    print("Attempting csv download ...")
     review.download_csv()
-    print('Attempting sketches download ... ')
+    print("Attempting sketches download ... ")
     review.download_sketches()
     for ri in review.get_review_items():
-        print((
-            "Attempting ReviewItem Download - "
-            "{order} ({type}): {name}"
-            " -- {size}"
-            " ...").format(**ri.get_data()))
-        print('started download', ri.download_original())
+        print(
+            (
+                "Attempting ReviewItem Download - "
+                "{order} ({type}): {name}"
+                " -- {size}"
+                " ..."
+            ).format(**ri.get_data())
+        )
+        print("started download", ri.download_original())
     time.sleep(5)
 
 
-def scroll_review(driver, rid: str = 'review_2462537'):
-    project_page = load_project_page(driver)
+def scroll_review(driver, rid: str = "review_2462537"):
+    project_page = ProjectPage(driver)
     project_page.scroll_once()
     review = project_page.get_review(rid)
     if review is None:
@@ -117,6 +118,13 @@ def scroll_review(driver, rid: str = 'review_2462537'):
             break
 
 
+def download_reviews():
+    driver = get_chrome_driver()
+    load_project_page(driver)
+    download_review(driver, "*2473433")
+    # download_review(driver, "review_2490864")
+    download_review(driver, "*2462537")
+
+
 if __name__ == "__main__":
-    driver = webdriver.Chrome()
-    download_review(driver, "review_2462537")
+    download_reviews()

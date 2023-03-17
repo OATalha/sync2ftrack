@@ -1,4 +1,6 @@
 from fnmatch import fnmatch
+import os
+import re
 from typing import Optional, Any
 import datetime
 
@@ -7,6 +9,9 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.wait import WebDriverWait
+
+
+from webdriver_utils import DownloadManager
 
 
 from .locators import (
@@ -73,6 +78,7 @@ class SubPage(Page):
     def __init__(self, parent_page: Page, root_element: WebElement):
         self.parent_page = parent_page
         self.root_element = root_element
+        assert self.verify()
 
     @property
     def driver(self) -> WebDriver:
@@ -124,7 +130,6 @@ class MainPage(Page):
 
 
 class LoginPage(Page):
-
     email_field = SimpleElement(LoginPageLocators.EMAIL_FIELD)
     password_field = WaitedElement(LoginPageLocators.PASSWORD_FIELD)
     continue_button = SimpleElement(LoginPageLocators.CONTINUE_BUTTON)
@@ -180,9 +185,16 @@ class ProjectPage(Page):
                     return review
 
 
-class Review(SubPage):
+class ProjectSubPage(SubPage):
+    def __init__(self, parent_page: ProjectPage, root_element: WebElement):
+        self.parent_page = parent_page
+        self.root_element = root_element
+        assert self.verify()
+
+
+class Review(ProjectSubPage):
     expand_button = SimpleSubPageElement(ReviewLocators.EXPAND_BUTTON)
-    download_button = WaitedSubPageElement(ReviewLocators.DL_BUTTON, 2)
+    download_button = WaitedSubPageElement(ReviewLocators.DL_BUTTON, 1)
     switch_button = WaitedSubPageElement(ReviewLocators.SWITCH_BUTTON)
     details_div = SimpleSubPageElement(ReviewLocators.DETAILS_DIV)
     details_table = SimpleSubPageElement(ReviewLocators.DETAILS_TABLE)
@@ -190,7 +202,10 @@ class Review(SubPage):
     review_items = WaitedSubPageElements(ReviewLocators.REVIEW_ITEM)
 
     def get_id(self) -> str:
-        return self.root_element.get_dom_attribute("id")
+        id_string = self.root_element.get_dom_attribute("id")
+        if match := re.match(r"^review_(\d+)$", id_string):
+            return match.group(1)
+        return id_string
 
     def get_name(self) -> str:
         review_name = self.root_element.find_element(
@@ -220,14 +235,19 @@ class Review(SubPage):
                 return False
         return False
 
-    def expand(self, wait: int = 1) -> bool:
+    def expand(self, wait: int = 1, max_tries: int = 10) -> bool:
         self.scroll_to_top()
-        if not self.is_expanded():
-            self.expand_button.click()
+        attempts = 0
+        while True:
             try:
+                if not self.is_expanded():
+                    self.expand_button.click()
                 WebDriverWait(self.driver, wait).until(self.is_expanded)
+                break
             except TimeoutException:
-                return False
+                attempts += 1
+                if attempts >= max_tries:
+                    raise
         return True
 
     def collapse(self, wait: int = 1):
@@ -241,14 +261,20 @@ class Review(SubPage):
                 return False
         return True
 
-    def show_details_table(self, wait: int = 5):
+    def show_details_table(self, wait: int = 1, max_tries: int = 10):
         self.expand()
-        if not self.has_details_table():
-            self.switch_button.click()
+        attempts = 0
+        while True:
             try:
+                if not self.has_details_table():
+                    print("requesting switch")
+                    self.switch_button.click()
                 WebDriverWait(self.driver, wait).until(self.has_details_table)
+                break
             except TimeoutException:
-                return False
+                attempts += 1
+                if attempts >= max_tries:
+                    raise
         return True
 
     def get_review_items(self):
@@ -258,7 +284,7 @@ class Review(SubPage):
             for element in self.review_items
         ]
 
-    def request_download(self, text, max_tries: int = 5):
+    def request_download(self, text, max_tries: int = 10):
         attempts = 0
         while True:
             try:
@@ -273,11 +299,13 @@ class Review(SubPage):
         item = menu.get_download_item_by_text(text)
         item.click()
 
-    def download_csv(self, max_tries=5):
-        self.request_download("*CSV", max_tries=max_tries)
-        # await download
+    def download_csv(self, max_tries: int = 10):
+        with DownloadManager(pattern="*.csv") as dm:
+            self.request_download("*CSV", max_tries=max_tries)
+        print(f"CSV File Downloaded: {dm.downloaded_file}")
+        return dm.downloaded_file
 
-    def download_sketches(self, wait: int = 5, max_tries: int = 5):
+    def download_sketches(self, wait: int = 3, max_tries: int = 10):
         self.request_download("*.Zip", max_tries=max_tries)
         diag = DownloadDialog(self.parent_page)
         attempts = 0
@@ -289,10 +317,13 @@ class Review(SubPage):
                 attempts += 1
                 if attempts >= max_tries:
                     raise
-        diag.begin_download()
+        with DownloadManager(pattern="*.zip") as dm:
+            diag.begin_download()
+        print(f"Zip File Downloaded: {dm.downloaded_file}")
+        return dm.downloaded_file
 
 
-class ReviewItem(SubPage):
+class ReviewItem(ProjectSubPage):
     order_cell = SimpleSubPageElement(ReviewItemLocators.ORDER_CELL)
     name_cell = SimpleSubPageElement(ReviewItemLocators.NAME_CELL)
     by_cell = SimpleSubPageElement(ReviewItemLocators.BY_CELL)
@@ -301,7 +332,20 @@ class ReviewItem(SubPage):
     views_cell = SimpleSubPageElement(ReviewItemLocators.VIEWS_CELL)
     size_cell = SimpleSubPageElement(ReviewItemLocators.SIZE_CELL)
     type_cell = SimpleSubPageElement(ReviewItemLocators.TYPE_CELL)
-    download_button = WaitedSubPageElement(ReviewItemLocators.DL_BUTTON, 2)
+    download_button = WaitedSubPageElement(ReviewItemLocators.DL_BUTTON, 1)
+
+    def get_id(self):
+        for _class in self.root_element.get_attribute("className").split():
+            if match := re.match(r"^id_(\d+)$", _class):
+                return match.group(1)
+
+    def get_review_id(self):
+        for _class in self.root_element.get_attribute("className").split():
+            if match := re.match(r"^review_id_(\d+)$", _class):
+                return match.group(1)
+
+    def get_review(self):
+        return self.parent_page.get_review(self.get_id())
 
     def get_order(self):
         return int(self.order_cell.text)
@@ -330,6 +374,8 @@ class ReviewItem(SubPage):
 
     def get_data(self) -> dict[str, Any]:
         return {
+            "id": self.get_id(),
+            "review_id": self.get_review_id(),
             "order": self.get_order(),
             "name": self.get_name(),
             "views": self.get_views(),
@@ -340,7 +386,7 @@ class ReviewItem(SubPage):
             "upload_time": self.get_upload_time(),
         }
 
-    def initiate_download(self, text, max_tries=5):
+    def initiate_download(self, text, max_tries=10):
         attempts = 0
         while True:
             try:
@@ -357,13 +403,18 @@ class ReviewItem(SubPage):
 
     def download_original(self, max_tries=2):
         item_text = "*Original*"
-        self.initiate_download(item_text, max_tries=max_tries)
-        return self.get_name().lower()
+        base, ext = os.path.splitext(self.get_name())
+        with DownloadManager(pattern=f"*{ext}") as dm:
+            self.initiate_download(item_text, max_tries=max_tries)
+        return dm.downloaded_file
 
     def download_transcoded(self, max_tries=2):
         item_text = "*Transcoded*"
-        self.initiate_download(item_text, max_tries=max_tries)
-        return self.get_name().lower()
+        _, ext = os.path.splitext(self.get_name().lower())
+        with DownloadManager(pattern=f"*{ext}") as dm:
+            self.initiate_download(item_text, max_tries=max_tries)
+        print(f"{ext} file downloaded: {dm.downloaded_file}")
+        return dm.downloaded_file
 
 
 class PopOverMenu(SubPage):
@@ -414,7 +465,6 @@ class DownloadDialog(SubPage):
         return False
 
     def get_body_text(self) -> str:
-        print("body text: ", self.body.text)
         return self.body.text.strip()
 
     def begin_download(self):
