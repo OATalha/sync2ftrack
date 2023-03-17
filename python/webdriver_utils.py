@@ -72,37 +72,62 @@ def download_file_discovered(
     file_pattern: str,
     download_location: Optional[str] = None,
     old_contents: Optional[set] = None,
-    initial_wait: int = 10,
-    wait: int = 0,
-    sleep: float = 1
+    wait: float = 0,
+    sleep: float = 1,
+    partial_wait: float = 10
 ) -> Union[str, None]:
     print('waiting for download', file_pattern)
+
     if download_location is None:
         download_location = get_download_location()
+
     if old_contents is None:
         old_contents = set(os.listdir(download_location))
+
     match_found = False
     file_found = None
+    download_started = False
+
     start = time.perf_counter()
-    if initial_wait < 1:
-        initial_wait = 1
-    download_start_detected = False
+
+    if partial_wait < 1:
+        partial_wait = 1
+
     while not match_found:
         new_contents = set(os.listdir(download_location))
         diff = new_contents - old_contents
+
+        elapsed = time.perf_counter() - start
+        partial_files_found = 0
+
         for _file in diff:
+
             if fnmatch.fnmatch(_file, '*.crdownload'):
-                download_start_detected = True
+                partial_files_found += 1
+                download_started = True
+
             if fnmatch.fnmatchcase(_file, file_pattern):
                 match_found = True
                 file_found = _file
-        elapsed = time.perf_counter() - start
-        if not download_start_detected and elapsed > initial_wait:
-            raise DownloadNotDetected("Seems like no download has started")
+
+        print('elapsed:', elapsed,
+              'partial:', partial_files_found,
+              'initial_wait', partial_wait)
+
+        if not partial_files_found:
+            if download_started:
+                download_started = False
+                partial_wait = elapsed + 1.0
+            if elapsed > partial_wait:
+                raise DownloadNotDetected(
+                        f"{elapsed}s but no partial files found")
+
         if wait:
             if elapsed > wait:
                 raise DownloadTimeout(f"Download timeout: {wait}s")
+
         time.sleep(sleep)
+
     if file_found is not None:
         return os.path.join(download_location, file_found)
 
@@ -127,7 +152,7 @@ def remove_dir_contents(dirname: str) -> bool:
 class DownloadManager(object):
     def __init__(
         self, pattern: str = "*", download_location=None, wait: int = 0,
-        sleep: float = 1, make_empty: bool = True
+        sleep: float = 1, make_empty: bool = False
     ):
         if download_location is None:
             download_location = get_download_location()
