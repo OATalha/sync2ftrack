@@ -11,7 +11,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.wait import WebDriverWait
 
 
-from webdriver_utils import DownloadManager
+from webdriver_utils import DownloadManager, FileSize
 
 
 from .locators import (
@@ -42,6 +42,7 @@ class Page(object):
 
     def __init__(self, driver: WebDriver):
         self.driver = driver
+        self.full_load = False
         assert self.verify()
 
     @property
@@ -55,7 +56,7 @@ class Page(object):
     def verify(self) -> bool:
         return True
 
-    def wait_until_scroll_height_changed(self, scroll_height, wait: int = 5):
+    def wait_until_scroll_height_changed(self, scroll_height, wait: int = 10):
         def scrollHeightChanged(_):
             currentScrollHeight = int(
                 self.main_scroller.get_attribute("scrollHeight")
@@ -65,7 +66,10 @@ class Page(object):
         try:
             WebDriverWait(self.driver, wait).until(scrollHeightChanged)
         except TimeoutException:
+            self.full_load = True
             return False
+
+        self.full_load = False
         return True
 
     def scroll_to(self, height: int):
@@ -96,14 +100,16 @@ class SubPage(Page):
         self.driver.execute_script(
             "arguments[0].scrollIntoView(true)", self.root_element
         )
-        self.parent_page.wait_until_scroll_height_changed(scroll_height)
+        if not self.parent_page.full_load:
+            self.parent_page.wait_until_scroll_height_changed(scroll_height)
 
     def scroll_to_view(self):
         scroll_height = self.parent_page.scroll_height
         self.driver.execute_script(
             "arguments[0].scrollIntoViewIfNeeded(true)", self.root_element
         )
-        self.parent_page.wait_until_scroll_height_changed(scroll_height)
+        if not self.parent_page.full_load:
+            self.parent_page.wait_until_scroll_height_changed(scroll_height)
 
     def get_rect(self) -> dict[str, float]:
         location = self.driver.execute_script(
@@ -157,8 +163,7 @@ class ProjectPage(Page):
     def scroll_once(self, wait: int = 5) -> bool:
         scroll_height = int(self.main_scroller.get_attribute("scrollHeight"))
         self.scroll_to(scroll_height)
-        self.wait_until_scroll_height_changed(scroll_height, wait)
-        return True
+        return self.wait_until_scroll_height_changed(scroll_height, wait)
 
     def scroll_to_end(self, max_scrolls: Optional[int] = None, wait: int = 5):
         counter = 0
@@ -261,13 +266,12 @@ class Review(ProjectSubPage):
                 return False
         return True
 
-    def show_details_table(self, wait: int = 1, max_tries: int = 10):
+    def show_details_table(self, wait: int = 0.1, max_tries: int = 50):
         self.expand()
         attempts = 0
         while True:
             try:
                 if not self.has_details_table():
-                    print("requesting switch")
                     self.switch_button.click()
                 WebDriverWait(self.driver, wait).until(self.has_details_table)
                 break
@@ -360,7 +364,7 @@ class ReviewItem(ProjectSubPage):
         return int(self.notes_cell.text)
 
     def get_size(self):
-        return self.size_cell.text
+        return FileSize(self.size_cell.text)
 
     def get_type(self):
         return self.type_cell.text
@@ -403,8 +407,11 @@ class ReviewItem(ProjectSubPage):
 
     def download_original(self, max_tries=2):
         item_text = "*Original*"
-        base, ext = os.path.splitext(self.get_name())
-        with DownloadManager(pattern=f"*{ext}") as dm:
+        _, ext = os.path.splitext(self.get_name())
+        with DownloadManager(
+            pattern=f"*{ext}",
+            file_size=self.get_size(),
+        ) as dm:
             self.initiate_download(item_text, max_tries=max_tries)
         return dm.downloaded_file
 
@@ -413,7 +420,7 @@ class ReviewItem(ProjectSubPage):
         _, ext = os.path.splitext(self.get_name().lower())
         with DownloadManager(pattern=f"*{ext}") as dm:
             self.initiate_download(item_text, max_tries=max_tries)
-        print(f"{ext} file downloaded: {dm.downloaded_file}")
+        print(f"{ext} Media Downloaded: {dm.downloaded_file}")
         return dm.downloaded_file
 
 

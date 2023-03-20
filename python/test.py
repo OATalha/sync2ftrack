@@ -1,3 +1,4 @@
+import random
 from selenium import webdriver
 import os
 import sys
@@ -7,7 +8,13 @@ import json
 
 
 from ss_crawler.pages import MainPage, LoginPage, ProjectPage
-from webdriver_utils import get_chrome_driver, get_credentials
+from webdriver_utils import (
+    FileSize,
+    get_chrome_driver,
+    get_credentials,
+    get_download_location,
+    remove_dir_contents,
+)
 
 
 os.environ["PATH"] += os.pathsep + os.path.abspath(
@@ -97,7 +104,7 @@ def download_review(driver, rid: str = "review_2479559"):
                 " ..."
             ).format(**ri.get_data())
         )
-        print("started download", ri.download_original())
+        ri.download_original()
     time.sleep(5)
 
 
@@ -120,11 +127,36 @@ def scroll_review(driver, rid: str = "review_2462537"):
 
 def download_reviews():
     driver = get_chrome_driver()
+    remove_dir_contents(get_download_location())
     load_project_page(driver)
-    download_review(driver, "*2473433")
-    # download_review(driver, "review_2490864")
-    download_review(driver, "*2462537")
+    download_review(driver, "2473433")
+    download_review(driver, "2490864")
+    # download_review(driver, "*2462537")
+
+
+def collect_file_sizes():
+    driver = get_chrome_driver()
+    project_page = load_project_page(driver)
+    project_page.scroll_to_end()
+    all_sizes = []
+    # random.choices(project_page.get_reviews(), k=10):
+    fs_acc = FileSize(0)
+    reviews = project_page.get_reviews()
+    total_reviews = len(reviews)
+    for i, review in enumerate(reviews):
+        sizes = [item.get_size() for item in review.get_review_items()]
+        for fs in sizes:
+            fs_acc += fs
+            print(
+                f"review: {i} of {total_reviews}",
+                "size: ",
+                fs.humanized(),
+                "acc:",
+                fs_acc.humanized(),
+            )
+        all_sizes.extend(sizes)
+    return all_sizes
 
 
 if __name__ == "__main__":
-    download_reviews()
+    collect_file_sizes()

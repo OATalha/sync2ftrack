@@ -1,6 +1,7 @@
 import fnmatch
 import json
 import os
+import re
 import time
 from typing import Optional, Union
 import shutil
@@ -68,15 +69,103 @@ def get_cache_location() -> str:
     return os.path.abspath(get_config()["cache_location"])
 
 
-def download_file_discovered(
+
+
+def remove_dir_contents(dirname: str) -> bool:
+    if not os.path.exists(dirname):
+        return True
+    if os.path.isdir(dirname):
+        for name in os.listdir(dirname):
+            path = os.path.join(dirname, name)
+            try:
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.unlink(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)
+            except Exception as e:
+                return False
+        return True
+    return False
+
+
+class FileSize:
+    UNITS = ["B", "KB", "MB", "GB"]
+    BASE = 10
+    UNIT_POWER = 3
+
+    def __init__(self, size: Union[int, str]):
+        if isinstance(size, str):
+            self.value = self.parse_to_int(size)
+        else:
+            self.value = size
+
+    def __int__(self):
+        return self.value
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return f"FileSize({self.value})"
+
+    def __value__(self, other) -> int:
+        if isinstance(other, FileSize):
+            return other.value
+        elif isinstance(other, str):
+            return self.parse_to_int(other)
+        else:
+            return int(other)
+
+    def __add__(self, other: Union["FileSize", int, str]):
+        return FileSize(self.value + self.__value__(other))
+
+    def humanized(self) -> str:
+        return self.humanize(self.value)
+
+    def is_valid(self) -> bool:
+        return self.value >= 0
+
+    @classmethod
+    def unit_value(cls, unit: str):
+        index = cls.UNITS.index(unit)
+        return cls.BASE ** (index * cls.UNIT_POWER)
+
+    @classmethod
+    def size_pattern(cls):
+        num_pattern = r"(?P<value>\d+(\.\d+))"
+        tokens = "|".join([tok for tok in cls.UNITS])
+        unit = rf"(?P<unit>{tokens})"
+        return num_pattern + unit
+
+    @classmethod
+    def parse_to_int(cls, size_str: str) -> int:
+        if match := re.match(cls.size_pattern(), size_str):
+            value = float(match.group("value"))
+            unit = match.group("unit")
+            return int(value * cls.unit_value(unit))
+        return int(size_str)
+
+    @classmethod
+    def humanize(cls, size: int):
+        unit_factor = cls.BASE**cls.UNIT_POWER
+        num = float(size)
+        for unit in cls.UNITS[:-1]:
+            if abs(num) < unit_factor:
+                return f"{num:.1f}{unit}"
+            num /= unit_factor
+        return f"{num:.1f}{cls.UNITS[-1]}"
+
+
+def discover_downloaded_file(
     file_pattern: str,
+    file_size: Optional[FileSize] = None,
     download_location: Optional[str] = None,
     old_contents: Optional[set] = None,
     wait: float = 0,
     sleep: float = 1,
-    partial_wait: float = 10
+    partial_wait: float = 10,
 ) -> Union[str, None]:
-    print('waiting for download', file_pattern)
+    print("waiting for download", file_pattern)
 
     if download_location is None:
         download_location = get_download_location()
@@ -98,29 +187,34 @@ def download_file_discovered(
         diff = new_contents - old_contents
 
         elapsed = time.perf_counter() - start
-        partial_files_found = 0
+        partial_files_found = []
 
         for _file in diff:
-
-            if fnmatch.fnmatch(_file, '*.crdownload'):
-                partial_files_found += 1
+            if fnmatch.fnmatch(_file, "*.crdownload"):
+                partial_files_found.append(_file)
                 download_started = True
 
             if fnmatch.fnmatchcase(_file, file_pattern):
                 match_found = True
                 file_found = _file
 
-        print('elapsed:', elapsed,
-              'partial:', partial_files_found,
-              'initial_wait', partial_wait)
-
+        if partial_files_found and file_size is not None:
+            partial_file = partial_files_found[0]
+            size = FileSize(os.path.getsize(
+                os.path.join(download_location, partial_file)
+            ))
+            print((
+                f"{size.value/file_size.value * 100:.02f}% downloaded! - "
+                f"({size.humanized()} of {file_size.humanized()})"
+            ))
         if not partial_files_found:
             if download_started:
                 download_started = False
                 partial_wait = elapsed + 1.0
             if elapsed > partial_wait:
                 raise DownloadNotDetected(
-                        f"{elapsed}s but no partial files found")
+                    f"{elapsed}s but no partial files found"
+                )
 
         if wait:
             if elapsed > wait:
@@ -132,27 +226,15 @@ def download_file_discovered(
         return os.path.join(download_location, file_found)
 
 
-def remove_dir_contents(dirname: str) -> bool:
-    if not os.path.exists(dirname):
-        return True
-    if os.path.isdir(dirname):
-        for name in os.listdir(dirname):
-            path = os.path.join(dirname, name)
-            try:
-                if os.path.isfile(path) or os.path.islink(path):
-                    os.unlink(path)
-                elif os.path.isdir(path):
-                    shutil.rmtree(path)
-            except Exception as e:
-                return False
-        return True
-    return False
-
-
 class DownloadManager(object):
     def __init__(
-        self, pattern: str = "*", download_location=None, wait: int = 0,
-        sleep: float = 1, make_empty: bool = False
+        self,
+        pattern: str = "*",
+        file_size: Optional[FileSize] = None,
+        download_location=None,
+        wait: int = 0,
+        sleep: float = 1,
+        make_empty: bool = False,
     ):
         if download_location is None:
             download_location = get_download_location()
@@ -162,6 +244,7 @@ class DownloadManager(object):
         self.old_contents = set()
         self.sleep = sleep
         self.make_empty = make_empty
+        self.file_size = file_size
 
     def __enter__(self):
         if self.make_empty:
@@ -172,8 +255,11 @@ class DownloadManager(object):
         return self
 
     def __exit__(self, *_):
-        self.downloaded_file = download_file_discovered(self.pattern,
-                                                        self.download_location,
-                                                        self.old_contents,
-                                                        self.wait,
-                                                        self.sleep)
+        self.downloaded_file = discover_downloaded_file(
+            self.pattern,
+            file_size=self.file_size,
+            download_location=self.download_location,
+            old_contents=self.old_contents,
+            wait=self.wait,
+            sleep=self.sleep,
+        )
