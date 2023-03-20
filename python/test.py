@@ -6,6 +6,8 @@ import time
 
 import json
 
+from selenium.common.exceptions import TimeoutException
+
 
 from ss_crawler.pages import MainPage, LoginPage, ProjectPage
 from webdriver_utils import (
@@ -141,14 +143,25 @@ def collect_file_sizes():
     all_sizes = []
     # random.choices(project_page.get_reviews(), k=10):
     fs_acc = FileSize(0)
-    reviews = project_page.get_reviews()
-    total_reviews = len(reviews)
-    for i, review in enumerate(reviews):
-        sizes = [item.get_size() for item in review.get_review_items()]
+    review_ids = [r.get_id() for r in project_page.get_reviews()]
+    total_reviews = len(review_ids)
+    for i, _id in enumerate(review_ids):
+        if i % 10 == 0:
+            project_page.refresh()
+        review = project_page.get_review(_id)
+        if review is None:
+            print("review not found")
+            continue
+
+        try:
+            sizes = [item.get_size() for item in review.get_review_items()]
+        except TimeoutException:
+            continue
+
         for fs in sizes:
             fs_acc += fs
             print(
-                f"review: {i} of {total_reviews}",
+                f"review: {i+1} of {total_reviews}",
                 "size: ",
                 fs.humanized(),
                 "acc:",

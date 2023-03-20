@@ -19,13 +19,17 @@ class SimpleElement(object):
 
 
 class WaitedElement(SimpleElement):
-    def __init__(self, locator: tuple[str, str], wait: int = 10):
+    def __init__(self, locator: tuple[str, str], wait: int = 10,
+                 condition=None):
         super().__init__(locator)
         self.wait = wait
+        if condition is None:
+            condition = EC.visibility_of_element_located
+        self.condition = condition
 
     def __get__(self, obj: "Page", owner: type["Page"]) -> WebElement:
         element = WebDriverWait(obj.driver, self.wait).until(
-            EC.visibility_of_element_located(self.locator)
+            self.condition(self.locator)
         )
         return element
 
@@ -34,7 +38,7 @@ class WaitedElements(WaitedElement):
     def __get__(self, obj: "Page", owner: type["Page"]) -> list[WebElement]:
         try:
             WebDriverWait(obj.driver, self.wait).until(
-                EC.presence_of_element_located(self.locator)
+                self.condition(self.locator)
             )
         except TimeoutException:
             pass
@@ -53,7 +57,7 @@ class WaitedSubPageElement(WaitedElement):
     def __get__(self, obj: "SubPage", owner: type["SubPage"]) -> WebElement:
         driver = obj.root_element or obj.driver
         element = WebDriverWait(driver, self.wait).until(
-            EC.visibility_of_element_located(self.locator)
+            self.condition(self.locator)
         )
         return element
 
@@ -64,13 +68,18 @@ class SubPageRootElement(WaitedElement):
 
 
 class WaitedSubPageElements(WaitedElement):
+    def __init__(self, locator, wait: int = 10, condition=None):
+        if condition is None:
+            condition = EC.presence_of_element_located
+        super().__init__(locator, wait, condition)
+
     def __get__(
         self, obj: "SubPage", owner: type["SubPage"]
     ) -> list[WebElement]:
         driver = obj.root_element or obj.driver
         try:
             WebDriverWait(driver, self.wait).until(
-                EC.presence_of_element_located(self.locator)
+                self.condition(self.locator)
             )
         except TimeoutException:
             pass

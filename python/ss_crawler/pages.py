@@ -1,6 +1,7 @@
 from fnmatch import fnmatch
 import os
 import re
+import time
 from typing import Optional, Any
 import datetime
 
@@ -44,6 +45,10 @@ class Page(object):
         self.driver = driver
         self.full_load = False
         assert self.verify()
+
+    def refresh(self):
+        self.driver.get(self.driver.current_url)
+        self.full_load = False
 
     @property
     def scroll_height(self):
@@ -181,13 +186,16 @@ class ProjectPage(Page):
     ) -> Optional["Review"]:
         if id is None and name is None:
             raise TypeError("Please provide either 'id' or 'name'")
-        for review in self.get_reviews():
-            if id is not None:
-                if fnmatch(review.get_id(), id):
-                    return review
-            elif name is not None:
-                if fnmatch(review.get_name(), name):
-                    return review
+        while True:
+            for review in self.get_reviews():
+                if id is not None:
+                    if fnmatch(review.get_id(), id):
+                        return review
+                elif name is not None:
+                    if fnmatch(review.get_name(), name):
+                        return review
+            if not self.scroll_once():
+                break
 
 
 class ProjectSubPage(SubPage):
@@ -202,8 +210,8 @@ class Review(ProjectSubPage):
     download_button = WaitedSubPageElement(ReviewLocators.DL_BUTTON, 1)
     switch_button = WaitedSubPageElement(ReviewLocators.SWITCH_BUTTON)
     details_div = SimpleSubPageElement(ReviewLocators.DETAILS_DIV)
-    details_table = SimpleSubPageElement(ReviewLocators.DETAILS_TABLE)
-    details_grid = SimpleSubPageElement(ReviewLocators.DETAILS_GRID)
+    details_table = WaitedSubPageElement(ReviewLocators.DETAILS_TABLE)
+    details_grid = WaitedSubPageElement(ReviewLocators.DETAILS_GRID)
     review_items = WaitedSubPageElements(ReviewLocators.REVIEW_ITEM)
 
     def get_id(self) -> str:
@@ -236,7 +244,7 @@ class Review(ProjectSubPage):
         if self.is_expanded():
             try:
                 return self.details_table.is_displayed()
-            except NoSuchElementException:
+            except TimeoutException:
                 return False
         return False
 
@@ -266,12 +274,13 @@ class Review(ProjectSubPage):
                 return False
         return True
 
-    def show_details_table(self, wait: int = 0.1, max_tries: int = 50):
+    def show_details_table(self, wait: int = 1, max_tries: int = 5):
         self.expand()
         attempts = 0
         while True:
             try:
                 if not self.has_details_table():
+                    self.scroll_to_top()
                     self.switch_button.click()
                 WebDriverWait(self.driver, wait).until(self.has_details_table)
                 break
@@ -363,8 +372,11 @@ class ReviewItem(ProjectSubPage):
     def get_notes(self):
         return int(self.notes_cell.text)
 
-    def get_size(self):
-        return FileSize(self.size_cell.text)
+    def get_size(self, wait: float = 1, max_tries: int = 5):
+        try:
+            return FileSize(self.size_cell.text)
+        except ValueError:
+            pass
 
     def get_type(self):
         return self.type_cell.text
