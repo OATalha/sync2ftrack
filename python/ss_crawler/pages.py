@@ -1,7 +1,6 @@
 from fnmatch import fnmatch
 import os
 import re
-import time
 from typing import Optional, Any
 import datetime
 
@@ -10,9 +9,6 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.wait import WebDriverWait
-
-
-from webdriver_utils import DownloadManager, FileSize
 
 
 from .locators import (
@@ -36,6 +32,10 @@ from .elements import (
     WaitedSubPageElement,
     WaitedSubPageElements,
 )
+
+
+from .utils.download_management import DownloadManager
+from .utils.filesize import FileSize
 
 
 class Page(object):
@@ -372,7 +372,7 @@ class ReviewItem(ProjectSubPage):
     def get_notes(self):
         return int(self.notes_cell.text)
 
-    def get_size(self, wait: float = 1, max_tries: int = 5):
+    def get_size(self):
         try:
             return FileSize(self.size_cell.text)
         except ValueError:
