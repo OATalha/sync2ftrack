@@ -1,0 +1,5 @@
+{
+    "download_location": "/Volumes/data/ss_downloads/tmp",
+    "cache_location": "/Volumes/data/ss_downloads/cache"
+    "chrome_driver": "{ROOT}/drivers/{platform}/chrome_driver"
+}
