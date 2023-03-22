@@ -8,10 +8,17 @@ from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.support.expected_conditions import presence_of_element_located
+from selenium.webdriver.support.expected_conditions import (
+    presence_of_element_located,
+)
 from selenium.webdriver.support.wait import WebDriverWait
 
-from ss_crawler.exceptions import InvalidState, UnknownValue
+from ss_crawler.exceptions import (
+    InvalidState,
+    InvalidValue,
+    UnknownValue,
+    UnverifiedPage,
+)
 
 
 from .locators import (
@@ -47,7 +54,10 @@ class Page(object):
     def __init__(self, driver: WebDriver):
         self.driver = driver
         self.full_load = False
-        assert self.verify()
+        if not self.verify():
+            raise UnverifiedPage(
+                f"{self.__class__.__name__} could not be verified"
+            )
 
     def refresh(self):
         self.driver.get(self.driver.current_url)
@@ -90,7 +100,10 @@ class SubPage(Page):
     def __init__(self, parent_page: Page, root_element: WebElement):
         self.parent_page = parent_page
         self.root_element = root_element
-        assert self.verify()
+        if not self.verify():
+            raise UnverifiedPage(
+                f"{self.__class__.__name__} could not be verified"
+            )
 
     @property
     def driver(self) -> WebDriver:
@@ -162,11 +175,10 @@ class LoginPage(Page):
 class ProjectPage(Page):
     workspace_title = WaitedElement(
         ProjectPageLocators.WORKSPACE_NAME,
-        condition=presence_of_element_located
+        condition=presence_of_element_located,
     )
     project_title = WaitedElement(
-        ProjectPageLocators.PROJECT_NAME,
-        condition=presence_of_element_located
+        ProjectPageLocators.PROJECT_NAME, condition=presence_of_element_located
     )
     main_scroller = WaitedElement(ProjectPageLocators.MAIN_SCROLLER)
     reviews = WaitedElements(ProjectPageLocators.REVIEW)
@@ -212,7 +224,10 @@ class ProjectSubPage(SubPage):
     def __init__(self, parent_page: ProjectPage, root_element: WebElement):
         self.parent_page = parent_page
         self.root_element = root_element
-        assert self.verify()
+        if not self.verify():
+            raise UnverifiedPage(
+                f"{self.__class__.__name__} could not be verified"
+            )
 
 
 class Review(ProjectSubPage):
@@ -392,7 +407,10 @@ class ReviewItem(ProjectSubPage):
         return self.parent_page.get_review(self.get_id())
 
     def get_order(self):
-        return int(self.order_cell.text)
+        try:
+            return int(self.order_cell.text)
+        except ValueError as exc:
+            raise InvalidValue from exc
 
     def get_name(self):
         return self.name_cell.get_dom_attribute("title")

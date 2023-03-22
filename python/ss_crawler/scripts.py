@@ -6,6 +6,7 @@ from ss_crawler.exceptions import SSCrawlerException
 from ss_crawler.pages import LoginPage, MainPage, ProjectPage
 from ss_crawler.utils.cache import ReviewCache, ReviewItemCache
 from ss_crawler.utils.credentials import get_credentials
+from ss_crawler.utils.filesize import FileSize
 from ss_crawler.utils.webdriver import ChromeDriver, get_chrome_driver
 
 
@@ -69,12 +70,12 @@ def sync_reviews_data(driver: WebDriver) -> list[str]:
 def sync_review_items_data(driver: WebDriver, review_id: str) -> str:
     project_page = ensure_project_page(driver)
     review = project_page.get_review(review_id)
-    review_cache = ReviewCache(review_id)
+    review_cache = ReviewCache(review_id, data=review.get_data())
     print(f"Syncing review item data for {review_id} ...")
     for review_item in review.get_review_items():
         if review_item.get_review_id() != review_id:
-            print('Unexpected review id ... ignoring')
-        review_cache.append_review_item(review.get_data())
+            print("Unexpected review id ... ignoring")
+        review_cache.append_review_item(review_item.get_data())
     return review_cache.store_data()
 
 
@@ -139,3 +140,59 @@ def sync_all_data(driver: WebDriver):
         except (WebDriverException, SSCrawlerException) as exc:
             print(f"Error Encountered with review_{rid}", exc)
             continue
+
+
+def sync_all_reviews(driver: WebDriver):
+    review_ids = sync_reviews_data(driver)
+    project_page = ProjectPage(driver)
+
+    for_caching = review_ids[:]
+    while for_caching:
+        for_caching, rids = [], for_caching
+        for idx, review_id in enumerate(rids):
+            if (idx + 1) % 10 == 0:
+                project_page.refresh()
+
+            try:
+                print(f"Getting review {review_id} ...")
+                review = project_page.get_review(id=review_id)
+                review_cache = ReviewCache(review_id, review.get_data())
+                review_items = review.get_review_items()
+
+                print(f"Storing cache for {review_id} ...")
+                for review_item in review_items:
+                    review_item_data = review_item.get_data()
+                    if "size" in review_item_data:
+                        review_item_data["size"] = int(
+                            review_item_data["size"]
+                        )
+                    if "upload_time" in review_item_data:
+                        upload_time = review_item_data["upload_time"]
+                        review_item_data[
+                            "upload_time"
+                        ] = upload_time.timestamp()
+                    review_cache.append_review_item(review_item_data)
+                cache_meta = review_cache.store_data()
+
+                print(f"meta data stored at {cache_meta}")
+                csv = review.download_csv()
+                csv_cache = review_cache.store_file(csv)
+                print(f"downloaded file {csv} stored at {csv_cache}")
+                sketch = review.download_sketches()
+                sketch_cache = review_cache.store_file(sketch)
+                print(f"downloaded file {sketch} stored at {sketch_cache}")
+
+                print(f"Downloading items for review_{review_id}")
+                for review_item in review_items:
+                    review_item_cache = ReviewItemCache(
+                        review_item.get_id(),
+                        review_id,
+                        data=review_item.get_data(),
+                    )
+                    if review_item_cache.needs_download:
+                        original = review_item.download_original()
+                        review_item_cache.store_media(original)
+            except (WebDriverException, SSCrawlerException) as exc:
+                print(f"Error with {review_id}:", exc)
+                print(f"Looping back in!")
+                for_caching.append(review_id)

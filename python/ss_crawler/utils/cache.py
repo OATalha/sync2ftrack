@@ -4,6 +4,8 @@ import shutil
 from typing import Optional
 from datetime import datetime
 
+from ss_crawler.utils.filesize import FileSize
+
 
 from ..conf import get_cache_location, DEFAULT_CONF_PATH
 
@@ -82,6 +84,7 @@ class ItemCache(object):
         file_path = os.path.join(self.cache_dir, f"review_{self._id}{ext}")
         if os.path.isfile(file_path):
             os.unlink(file_path)
+        shutil.copy2(path, file_path)
         return file_path
 
 
@@ -109,7 +112,7 @@ class ReviewCache(ItemCache):
 
     def load_data(self):
         data = self._load_data()
-        self._review_items = data['review_items']
+        self._review_items = data["review_items"]
         self._dirty = False
 
     @property
@@ -160,9 +163,7 @@ class ReviewItemCache(ItemCache):
 
     @property
     def upload_time(self) -> datetime:
-        return self._data.get(
-            "upload_time", datetime.fromtimestamp(0)
-        )
+        return self._data.get("upload_time", datetime.fromtimestamp(0))
 
     @property
     def needs_download(self) -> bool:
@@ -175,9 +176,20 @@ class ReviewItemCache(ItemCache):
     def store_data(self):
         data = self._data.copy()
         data["review_id"] = self._review_id
+        if "size" in data:
+            size = data["size"]
+            if isinstance(size, FileSize):
+                size = size.value
+            data["size"] = data["size"].value
         datafile = self._store_data(data)
         self._dirty = False
         return datafile
+
+    def load_data(self):
+        self._data = self._load_data()
+        if "size" in self._data:
+            self._data["size"] = FileSize(self._data["size"])
+        self._dirty = False
 
     def store_media(self, path):
         filename = self.filename
@@ -215,6 +227,3 @@ class ReviewItemCache(ItemCache):
 #         shutil.copy(self.filename, archive_path)
 #         shutil.copy(self.metadata_file, archive_dir)
 #         return archive_path
-
-
-

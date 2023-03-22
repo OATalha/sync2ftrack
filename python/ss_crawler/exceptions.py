@@ -10,6 +10,14 @@ class InvalidState(SSCrawlerException):
     pass
 
 
+class InvalidValue(SSCrawlerException):
+    pass
+
+
+class UnverifiedPage(SSCrawlerException):
+    pass
+
+
 class CacheException(SSCrawlerException):
     pass
 
