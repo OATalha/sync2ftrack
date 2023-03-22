@@ -6,19 +6,8 @@ import fnmatch
 from typing import Optional, Union
 
 from .filesize import FileSize
-from .webdriver import get_download_location
-
-
-class DownloadException(Exception):
-    pass
-
-
-class DownloadTimeout(DownloadException):
-    pass
-
-
-class DownloadNotDetected(DownloadException):
-    pass
+from ..conf import get_download_location
+from ..exceptions import DownloadTimeout, DownloadNotDetected
 
 
 def remove_dir_contents(dirname: str) -> bool:

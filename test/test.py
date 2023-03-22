@@ -10,9 +10,10 @@ from selenium.common.exceptions import TimeoutException
 
 
 from ss_crawler.pages import MainPage, LoginPage, ProjectPage
+from ss_crawler.scripts import sync_all_data
 from ss_crawler.utils.credentials import get_credentials
 from ss_crawler.utils.filesize import FileSize
-from ss_crawler.utils.webdriver import get_chrome_driver, get_download_location
+from ss_crawler.utils.webdriver import ChromeDriver, get_chrome_driver, get_download_location
 from ss_crawler.utils.download_management import remove_dir_contents
 
 
@@ -169,4 +170,5 @@ def collect_file_sizes():
 
 
 if __name__ == "__main__":
-    collect_file_sizes()
+    with ChromeDriver() as driver:
+        sync_all_data(driver)

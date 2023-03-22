@@ -8,7 +8,10 @@ from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.support.expected_conditions import presence_of_element_located
 from selenium.webdriver.support.wait import WebDriverWait
+
+from ss_crawler.exceptions import InvalidState, UnknownValue
 
 
 from .locators import (
@@ -157,8 +160,14 @@ class LoginPage(Page):
 
 
 class ProjectPage(Page):
-    workspace_title = WaitedElement(ProjectPageLocators.WORKSPACE_NAME)
-    project_title = WaitedElement(ProjectPageLocators.PROJECT_NAME)
+    workspace_title = WaitedElement(
+        ProjectPageLocators.WORKSPACE_NAME,
+        condition=presence_of_element_located
+    )
+    project_title = WaitedElement(
+        ProjectPageLocators.PROJECT_NAME,
+        condition=presence_of_element_located
+    )
     main_scroller = WaitedElement(ProjectPageLocators.MAIN_SCROLLER)
     reviews = WaitedElements(ProjectPageLocators.REVIEW)
 
@@ -183,7 +192,7 @@ class ProjectPage(Page):
 
     def get_review(
         self, id: Optional[str] = None, name: Optional[str] = None
-    ) -> Optional["Review"]:
+    ) -> "Review":
         if id is None and name is None:
             raise TypeError("Please provide either 'id' or 'name'")
         while True:
@@ -196,6 +205,7 @@ class ProjectPage(Page):
                         return review
             if not self.scroll_once():
                 break
+        raise UnknownValue(f"Cannot find review for id: {id} and name: {name}")
 
 
 class ProjectSubPage(SubPage):
@@ -213,6 +223,7 @@ class Review(ProjectSubPage):
     details_table = WaitedSubPageElement(ReviewLocators.DETAILS_TABLE)
     details_grid = WaitedSubPageElement(ReviewLocators.DETAILS_GRID)
     review_items = WaitedSubPageElements(ReviewLocators.REVIEW_ITEM)
+    item_count = SimpleSubPageElement(ReviewLocators.ITEM_COUNT)
 
     def get_id(self) -> str:
         id_string = self.root_element.get_dom_attribute("id")
@@ -225,6 +236,24 @@ class Review(ProjectSubPage):
             *(ReviewLocators.REVIEW_NAME)
         )
         return review_name.text
+
+    def get_item_count(self) -> int:
+        return int(self.item_count.text)
+
+    def get_project_title(self):
+        return self.parent_page.project_title.text.strip()
+
+    def get_workspace_title(self):
+        return self.parent_page.workspace_title.text.strip()
+
+    def get_data(self):
+        return {
+            "id": self.get_id(),
+            "name": self.get_name(),
+            "item_count": self.get_item_count(),
+            "workspace": self.get_workspace_title(),
+            "project": self.get_project_title(),
+        }
 
     def is_expanded(self, _=None) -> bool:
         try:
@@ -347,15 +376,17 @@ class ReviewItem(ProjectSubPage):
     type_cell = SimpleSubPageElement(ReviewItemLocators.TYPE_CELL)
     download_button = WaitedSubPageElement(ReviewItemLocators.DL_BUTTON, 1)
 
-    def get_id(self):
+    def get_id(self) -> str:
         for _class in self.root_element.get_attribute("className").split():
             if match := re.match(r"^id_(\d+)$", _class):
                 return match.group(1)
+        raise InvalidState("Cannot get_id for review_item")
 
-    def get_review_id(self):
+    def get_review_id(self) -> str:
         for _class in self.root_element.get_attribute("className").split():
             if match := re.match(r"^review_id_(\d+)$", _class):
                 return match.group(1)
+        raise InvalidState("Cannot get_id for review_item")
 
     def get_review(self):
         return self.parent_page.get_review(self.get_id())
@@ -373,10 +404,7 @@ class ReviewItem(ProjectSubPage):
         return int(self.notes_cell.text)
 
     def get_size(self):
-        try:
-            return FileSize(self.size_cell.text)
-        except ValueError:
-            pass
+        return FileSize(self.size_cell.text)
 
     def get_type(self):
         return self.type_cell.text

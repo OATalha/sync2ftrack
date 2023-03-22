@@ -39,6 +39,7 @@ class ReviewLocators(object):
     DETAILS_GRID = (By.CSS_SELECTOR, "div.details>div.itemListDiv")
     SWITCH_BUTTON = (By.CSS_SELECTOR, "div.switchIcons i")
     REVIEW_ITEM = (By.CSS_SELECTOR, "tr.el-table__row")
+    ITEM_COUNT = (By.CSS_SELECTOR, "div.rowStatusIndicator__count")
 
 
 class ReviewItemLocators(object):
