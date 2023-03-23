@@ -410,7 +410,7 @@ class ReviewItem(ProjectSubPage):
         try:
             return int(self.order_cell.text)
         except ValueError as exc:
-            raise InvalidValue from exc
+            raise InvalidValue(*exc.args) from exc
 
     def get_name(self):
         return self.name_cell.get_dom_attribute("title")

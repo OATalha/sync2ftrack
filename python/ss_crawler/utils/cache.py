@@ -13,6 +13,36 @@ from ..conf import get_cache_location, DEFAULT_CONF_PATH
 DATETIME_ARCHIVE_FORMAT = "%Y%m%d_%H%M%S_%f"
 
 
+def make_serializable(data: dict) -> dict:
+    serializable = {}
+    for key, value in data.items():
+        svalue = value
+        if isinstance(value, FileSize):
+            svalue = int(value)
+        elif isinstance(value, datetime):
+            svalue = value.timestamp()
+        elif isinstance(value, dict):
+            svalue = make_serializable(value)
+        elif isinstance(value, list):
+            svalue = [make_serializable(item) for item in value]
+        serializable[key] = svalue
+    return serializable
+
+
+def make_unserializable(data: dict) -> dict:
+    rdict = {}
+    for key, value in data.items():
+        rvalue = value
+        if key == "size":
+            rvalue = FileSize(value)
+        elif key == "upload_time":
+            rvalue = datetime.fromtimestamp(value)
+        elif isinstance(value, list):
+            rvalue = [make_unserializable(item) for item in value]
+        rdict[key] = rvalue
+    return rdict
+
+
 class ItemCache(object):
     cache_dir: str
     metadata_file: str
@@ -54,6 +84,7 @@ class ItemCache(object):
         self.create_directory()
         data["id"] = self._id
         metadata_file = self.metadata_file
+        data = make_serializable(data)
         with open(metadata_file, "w+") as data_file:
             json.dump(data, data_file, indent=2)
         return metadata_file
@@ -63,6 +94,7 @@ class ItemCache(object):
         if os.path.exists(self.metadata_file):
             with open(self.metadata_file) as datafile:
                 data = json.load(datafile)
+        data = make_unserializable(data)
         return data
 
     def store_data(self):
@@ -176,20 +208,9 @@ class ReviewItemCache(ItemCache):
     def store_data(self):
         data = self._data.copy()
         data["review_id"] = self._review_id
-        if "size" in data:
-            size = data["size"]
-            if isinstance(size, FileSize):
-                size = size.value
-            data["size"] = data["size"].value
         datafile = self._store_data(data)
         self._dirty = False
         return datafile
-
-    def load_data(self):
-        self._data = self._load_data()
-        if "size" in self._data:
-            self._data["size"] = FileSize(self._data["size"])
-        self._dirty = False
 
     def store_media(self, path):
         filename = self.filename

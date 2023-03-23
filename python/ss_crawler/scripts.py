@@ -1,7 +1,9 @@
 from typing import Optional
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.remote.webdriver import WebDriver
-from ss_crawler.exceptions import SSCrawlerException
+from selenium.webdriver.support.expected_conditions import number_of_windows_to_be
+from selenium.webdriver.support.wait import WebDriverWait
+from ss_crawler.exceptions import SSCrawlerException, UnverifiedPage
 
 from ss_crawler.pages import LoginPage, MainPage, ProjectPage
 from ss_crawler.utils.cache import ReviewCache, ReviewItemCache
@@ -33,6 +35,14 @@ def load_project_page(driver: Optional[WebDriver] = None):
     return ProjectPage(driver)
 
 
+def ensure_project_page(driver: Optional[WebDriver] = None) -> ProjectPage:
+    if driver is None:
+        driver = get_chrome_driver()
+    try:
+        return ProjectPage(driver)
+    except UnverifiedPage:
+        return load_project_page(driver)
+
 def get_reviews(
     project_page: Optional[ProjectPage] = None,
     driver: Optional[WebDriver] = None,
@@ -43,15 +53,6 @@ def get_reviews(
         project_page = load_project_page(driver)
     project_page.scroll_to_end()
     return project_page.get_reviews()
-
-
-def ensure_project_page(driver: Optional[WebDriver] = None) -> ProjectPage:
-    if driver is None:
-        driver = get_chrome_driver()
-    try:
-        return ProjectPage(driver)
-    except AssertionError:
-        return load_project_page(driver)
 
 
 def sync_reviews_data(driver: WebDriver) -> list[str]:
@@ -146,11 +147,17 @@ def sync_all_reviews(driver: WebDriver):
     review_ids = sync_reviews_data(driver)
     project_page = ProjectPage(driver)
 
+    handle = driver.current_window_handle
+
     for_caching = review_ids[:]
+    force_refresh = False
     while for_caching:
         for_caching, rids = [], for_caching
         for idx, review_id in enumerate(rids):
-            if (idx + 1) % 10 == 0:
+            if force_refresh:
+                project_page.refresh()
+                force_refresh = False
+            elif (idx + 1) % 10 == 0:
                 project_page.refresh()
 
             try:
@@ -192,7 +199,15 @@ def sync_all_reviews(driver: WebDriver):
                     if review_item_cache.needs_download:
                         original = review_item.download_original()
                         review_item_cache.store_media(original)
-            except (WebDriverException, SSCrawlerException) as exc:
+            except (WebDriverException, SSCrawlerException, ValueError) as exc:
+                if len(driver.window_handles) >= 2:
+                    try:
+                        WebDriverWait(driver, 10).until(
+                                number_of_windows_to_be(1))
+                    except TimeoutException:
+                        driver.switch_to.window(handle)
                 print(f"Error with {review_id}:", exc)
-                print(f"Looping back in!")
                 for_caching.append(review_id)
+                force_refresh = True
+        print(f"{len(for_caching)} errored out!")
+
