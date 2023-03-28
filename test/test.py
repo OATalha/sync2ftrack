@@ -11,9 +11,15 @@ from selenium.common.exceptions import TimeoutException
 
 from ss_crawler.pages import MainPage, LoginPage, ProjectPage
 from ss_crawler.scripts import sync_all_data, sync_all_reviews
+from ss_crawler.sync import sync_by_steps, sync_from_cache
+from ss_crawler.utils.cache import CacheAnalytics, print_analytics
 from ss_crawler.utils.credentials import get_credentials
 from ss_crawler.utils.filesize import FileSize
-from ss_crawler.utils.webdriver import ChromeDriver, get_chrome_driver, get_download_location
+from ss_crawler.utils.webdriver import (
+    ChromeDriver,
+    get_chrome_driver,
+    get_download_location,
+)
 from ss_crawler.utils.download_management import remove_dir_contents
 
 
@@ -169,6 +175,31 @@ def collect_file_sizes():
     return all_sizes
 
 
-if __name__ == "__main__":
+def sync():
+    # with ChromeDriver() as driver:
+    #     sync_by_steps(driver)
     with ChromeDriver() as driver:
-        sync_all_reviews(driver)
+        sync_from_cache(driver)
+
+
+def scroll_test():
+    with ChromeDriver() as driver:
+        project_page = load_project_page(driver)
+        project_page.scroll_to_end()
+        reviews = project_page.get_reviews()
+
+        first = reviews[0]
+        first.show_details_table()
+        time.sleep(5)
+
+        mid = reviews[int(len(reviews) / 2)]
+        mid.show_details_table()
+        time.sleep(5)
+
+        last = reviews[-1]
+        last.show_details_table()
+        time.sleep(5)
+
+
+if __name__ == "__main__":
+    sync()

@@ -1,13 +1,18 @@
 from fnmatch import fnmatch
 import os
 import re
+import time
 from typing import Optional, Any
 import datetime
 
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import (
+    TimeoutException,
+    NoSuchElementException,
+    WebDriverException,
+)
 from selenium.webdriver.support.expected_conditions import (
     presence_of_element_located,
 )
@@ -19,6 +24,7 @@ from ss_crawler.exceptions import (
     UnknownValue,
     UnverifiedPage,
 )
+from ss_crawler.utils.credentials import get_credentials
 
 
 from .locators import (
@@ -54,14 +60,24 @@ class Page(object):
     def __init__(self, driver: WebDriver):
         self.driver = driver
         self.full_load = False
-        if not self.verify():
-            raise UnverifiedPage(
-                f"{self.__class__.__name__} could not be verified"
-            )
+        self._verify()
+
+    def _verify(self):
+        error_msg = f"{self.__class__.__name__} could not be verified"
+        try:
+            if not self.verify():
+                raise UnverifiedPage(error_msg)
+        except WebDriverException as exc:
+            raise UnverifiedPage(error_msg) from exc
 
     def refresh(self):
-        self.driver.get(self.driver.current_url)
+        url = get_credentials()["url"]
+        self.driver.get(url)
         self.full_load = False
+
+    @property
+    def scroller_offset(self):
+        return int(self.main_scroller.get_attribute("offsetTop"))
 
     @property
     def scroll_height(self):
@@ -100,10 +116,7 @@ class SubPage(Page):
     def __init__(self, parent_page: Page, root_element: WebElement):
         self.parent_page = parent_page
         self.root_element = root_element
-        if not self.verify():
-            raise UnverifiedPage(
-                f"{self.__class__.__name__} could not be verified"
-            )
+        self._verify()
 
     @property
     def driver(self) -> WebDriver:
@@ -118,16 +131,10 @@ class SubPage(Page):
 
     def scroll_to_top(self):
         scroll_height = self.parent_page.scroll_height
-        self.driver.execute_script(
-            "arguments[0].scrollIntoView(true)", self.root_element
-        )
-        if not self.parent_page.full_load:
-            self.parent_page.wait_until_scroll_height_changed(scroll_height)
-
-    def scroll_to_view(self):
-        scroll_height = self.parent_page.scroll_height
-        self.driver.execute_script(
-            "arguments[0].scrollIntoViewIfNeeded(true)", self.root_element
+        screen_y = self.get_rect()["y"]
+        scroller_offset = self.parent_page.scroller_offset
+        self.parent_page.scroll_to(
+            int(self.parent_page.scroll_top + screen_y - scroller_offset)
         )
         if not self.parent_page.full_load:
             self.parent_page.wait_until_scroll_height_changed(scroll_height)
@@ -186,7 +193,7 @@ class ProjectPage(Page):
     def verify(self) -> bool:
         return bool(self.project_title.text)
 
-    def scroll_once(self, wait: int = 5) -> bool:
+    def scroll_once(self, wait: int = 10) -> bool:
         scroll_height = int(self.main_scroller.get_attribute("scrollHeight"))
         self.scroll_to(scroll_height)
         return self.wait_until_scroll_height_changed(scroll_height, wait)
@@ -198,6 +205,7 @@ class ProjectPage(Page):
                 counter += 1
                 if counter >= max_scrolls:
                     break
+        self.scroll_once()
 
     def get_reviews(self) -> list["Review"]:
         return [Review(self, element) for element in self.reviews]
@@ -219,15 +227,23 @@ class ProjectPage(Page):
                 break
         raise UnknownValue(f"Cannot find review for id: {id} and name: {name}")
 
+    def get_review2(self, id: str):
+        url = get_credentials()["url"]
+        url = os.path.join(url, "reviews", id)
+        print(f"refreshing page with review_{id}")
+        self.scroll_to_end()
+        self.driver.get(url)
+        for review in self.get_reviews():
+            if fnmatch(review.get_id(), id):
+                return review
+        raise UnknownValue(f"Cannot find review for id: {id}")
+
 
 class ProjectSubPage(SubPage):
     def __init__(self, parent_page: ProjectPage, root_element: WebElement):
         self.parent_page = parent_page
         self.root_element = root_element
-        if not self.verify():
-            raise UnverifiedPage(
-                f"{self.__class__.__name__} could not be verified"
-            )
+        self._verify()
 
 
 class Review(ProjectSubPage):
@@ -342,6 +358,7 @@ class Review(ProjectSubPage):
         ]
 
     def request_download(self, text, max_tries: int = 10):
+        self.scroll_to_top()
         attempts = 0
         while True:
             try:
@@ -490,10 +507,7 @@ class PopOverMenu(SubPage):
         super().__init__(parent_page, None)  # type: ignore
 
     def verify(self) -> bool:
-        try:
-            return self.root_element.is_displayed()
-        except TimeoutException:
-            return False
+        return self.root_element.is_displayed()
 
     def get_download_item_by_text(self, match_text: str) -> WebElement:
         for element in self.items:

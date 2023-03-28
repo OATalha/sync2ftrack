@@ -1,11 +1,13 @@
 from typing import Optional
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support.expected_conditions import number_of_windows_to_be
+from selenium.webdriver.support.expected_conditions import (
+    number_of_windows_to_be,
+)
 from selenium.webdriver.support.wait import WebDriverWait
 from ss_crawler.exceptions import SSCrawlerException, UnverifiedPage
 
-from ss_crawler.pages import LoginPage, MainPage, ProjectPage
+from ss_crawler.pages import LoginPage, MainPage, ProjectPage, Review
 from ss_crawler.utils.cache import ReviewCache, ReviewItemCache
 from ss_crawler.utils.credentials import get_credentials
 from ss_crawler.utils.filesize import FileSize
@@ -35,28 +37,21 @@ def load_project_page(driver: Optional[WebDriver] = None):
     return ProjectPage(driver)
 
 
-def ensure_project_page(driver: Optional[WebDriver] = None) -> ProjectPage:
-    if driver is None:
-        driver = get_chrome_driver()
+def ensure_project_page(driver: WebDriver) -> ProjectPage:
     try:
         return ProjectPage(driver)
     except UnverifiedPage:
         return load_project_page(driver)
 
-def get_reviews(
-    project_page: Optional[ProjectPage] = None,
-    driver: Optional[WebDriver] = None,
-):
-    if project_page is None:
-        if driver is None:
-            driver = get_chrome_driver()
-        project_page = load_project_page(driver)
+
+def get_all_reviews(driver: Optional[WebDriver] = None) -> list[Review]:
+    project_page = ensure_project_page(driver)
     project_page.scroll_to_end()
     return project_page.get_reviews()
 
 
 def sync_reviews_data(driver: WebDriver) -> list[str]:
-    reviews = get_reviews(driver=driver)
+    reviews = get_all_reviews(driver=driver)
     review_ids = []
     print(f"Syncing review data for {len(reviews)} reviews ...")
     for review in reviews:
@@ -203,11 +198,11 @@ def sync_all_reviews(driver: WebDriver):
                 if len(driver.window_handles) >= 2:
                     try:
                         WebDriverWait(driver, 10).until(
-                                number_of_windows_to_be(1))
+                            number_of_windows_to_be(1)
+                        )
                     except TimeoutException:
                         driver.switch_to.window(handle)
                 print(f"Error with {review_id}:", exc)
                 for_caching.append(review_id)
                 force_refresh = True
         print(f"{len(for_caching)} errored out!")
-

@@ -11,3 +11,7 @@ def get_credentials(path=os.path.abspath(os.path.expanduser(CRED_PATH))):
         CRED_PATH = path
     with open(path) as _cred:
         return json.load(_cred)
+
+
+def get_url():
+    return get_credentials()["url"]

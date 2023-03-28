@@ -1,16 +1,12 @@
+from typing import Optional
+import collections
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.remote.webdriver import WebDriver
-from ss_crawler.exceptions import SSCrawlerException
+from ss_crawler.exceptions import DownloadNotDetected, SSCrawlerException
 from ss_crawler.pages import ProjectPage
 
-from ss_crawler.scripts import ensure_project_page
-from ss_crawler.utils.cache import ReviewCache, ReviewItemCache
-
-
-def get_all_reviews(driver: WebDriver):
-    project_page = ensure_project_page(driver)
-    project_page.scroll_to_end()
-    return [review.get_id() for review in project_page.get_reviews()]
+from ss_crawler.scripts import ensure_project_page, get_all_reviews
+from ss_crawler.utils.cache import CacheAnalytics, ReviewCache, ReviewItemCache
 
 
 def sync_review_data(driver: WebDriver, review_id: str):
@@ -22,12 +18,14 @@ def sync_review_data(driver: WebDriver, review_id: str):
     for review_item in review.get_review_items():
         review_item_data = review_item.get_data()
         review_cache.append_review_item(review_item_data)
+    review_cache.store_data()
 
 
 def sync_review_files(driver: WebDriver, review_id: str):
     print(f"Downoading files for review_{review_id}")
     project_page = ensure_project_page(driver)
     review = project_page.get_review(review_id)
+    print(f'found review {review.get_id()}')
     review_data = review.get_data()
     review_cache = ReviewCache(review_data["id"], data=review_data)
     csv = review.download_csv()
@@ -50,45 +48,127 @@ def sync_review_items_media(driver: WebDriver, review_id: str):
             review_item_data,
         )
         if review_item_cache.needs_download:
-            orig = review_item.download_original()
-            orig_cache = review_item_cache.store_media(orig)
-            print(f"Download file: {orig} - stored at {orig_cache}")
+            try:
+                media = review_item.download_original()
+            except DownloadNotDetected:
+                media = review_item.download_transcoded()
+            media_cache = review_item_cache.store_media(media)
+            review_item_cache.store_data()
+            print(f"Download file: {media} - stored at {media_cache}")
 
 
-def sync_all_reviews(
+def sync_review(
     driver: WebDriver,
-    review_data=False,
-    review_files=False,
-    review_media=False,
+    review_id: str,
+    sync_data=True,
+    sync_files=True,
+    sync_media=True,
 ):
-    if not any([review_data, review_files, review_media]):
+    if not any([sync_data, sync_files, sync_media]):
+        raise AttributeError("Please specify atleast one operation")
+    if sync_data:
+        sync_review_data(driver, review_id)
+    if sync_files:
+        sync_review_files(driver, review_id)
+    if sync_media:
+        sync_review_items_media(driver, review_id)
+
+
+def sync_reviews(
+    driver: WebDriver,
+    sync_data=False,
+    sync_files=False,
+    sync_media=False,
+    review_ids: Optional[list[str]] = None,
+    max_tries: int = 3
+):
+    if not any([sync_data, sync_files, sync_media]):
         raise AttributeError("Must specify atleast one operation")
-    review_ids = get_all_reviews(driver)
+    project_page = ensure_project_page(driver)
+    if review_ids is None:
+        review_ids = [review.get_id() for review in get_all_reviews(driver)]
     my_handle = driver.current_window_handle
     to_sync = review_ids[:]
+    tries = collections.defaultdict(int)
     while to_sync:
         to_sync, rids = [], to_sync
-        print(f"Syncing data for {len(rids)} reviews ...")
+        print(f"Syncing for {len(rids)} reviews ...")
         for idx, review_id in enumerate(rids):
             if (idx + 1) % 10 == 0:
-                ProjectPage(driver).refresh()
+                project_page.refresh()
+                project_page.scroll_to_end()
             try:
                 print(f"Syncing {idx+1} of {len(rids)} ...")
-                if review_data:
-                    sync_review_data(driver, review_id)
-                if review_files:
-                    sync_review_files(driver, review_id)
-                if review_media:
-                    sync_review_items_media(driver, review_id)
+                sync_review(
+                    driver, review_id, sync_data, sync_files, sync_media
+                )
             except (SSCrawlerException, WebDriverException) as exc:
-                print(f"review_{review_id} errored out with exception", exc)
-                to_sync.append(review_id)
+                print(f"review_{review_id} errored with exception", exc)
+                import traceback
+                traceback.print_exc()
+                tries[review_id] += 1
+                if tries[review_id] < max_tries:
+                    to_sync.append(review_id)
                 driver.switch_to.window(my_handle)
-                ProjectPage(driver).refresh()
-        print(f"{len(to_sync)} errored out!")
+                project_page.refresh()
+                project_page.scroll_to_end()
+        if to_sync:
+            print(f"Trying {len(to_sync)} from those errored out!")
 
 
-def sync_all(driver: WebDriver):
-    sync_all_reviews(driver, review_data=True)
-    sync_all_reviews(driver, review_files=True)
-    sync_all_reviews(driver, review_media=True)
+def sync_by_steps(
+    driver: WebDriver,
+    sync_data=False,
+    sync_files=False,
+    sync_media=False,
+):
+    if not any([sync_data, sync_files, sync_media]):
+        raise AttributeError("Must specify atleast one operation")
+    if sync_data:
+        sync_reviews(driver, sync_data=True)
+    if sync_files:
+        sync_reviews(driver, sync_files=True)
+    if sync_media:
+        sync_reviews(driver, sync_media=True)
+
+
+def sync_from_cache(driver: WebDriver):
+    cache = CacheAnalytics()
+    cache_reviews = cache.get_reviews()
+    cache.filter_reviews
+    sync_reviews(
+        driver,
+        sync_data=True,
+        review_ids=[
+            r._id
+            for r in cache.filter_reviews(
+                key="needs_data_sync", reviews=cache_reviews
+            )
+        ],
+    )
+    sync_reviews(
+        driver,
+        sync_files=True,
+        review_ids=[
+            r._id
+            for r in cache.filter_reviews(
+                key="needs_files", reviews=cache_reviews
+            )
+        ],
+    )
+    sync_reviews(
+        driver,
+        sync_media=True,
+        review_ids=[
+            r._id
+            for r in cache.filter_reviews(
+                key="needs_media", reviews=cache_reviews
+            )
+        ],
+    )
+
+
+def complete_sync(driver):
+    sync_reviews(driver, sync_data=True)
+    sync_reviews(driver, sync_files=True)
+    sync_from_cache(driver)
