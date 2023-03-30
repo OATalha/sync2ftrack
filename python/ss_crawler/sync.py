@@ -1,12 +1,54 @@
 from typing import Optional
 import collections
+import os
+
+from tqdm import tqdm
+
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.remote.webdriver import WebDriver
 from ss_crawler.exceptions import DownloadNotDetected, SSCrawlerException
-from ss_crawler.pages import ProjectPage
 
-from ss_crawler.scripts import ensure_project_page, get_all_reviews
-from ss_crawler.utils.cache import CacheAnalytics, ReviewCache, ReviewItemCache
+from ss_crawler.scripts import (
+    ensure_project_page,
+    get_all_reviews,
+    load_project_page,
+)
+from ss_crawler.utils.cache import ProjectCache, ReviewCache, ReviewItemCache
+from ss_crawler.utils.credentials import get_project_id
+
+
+def sync_project_data(driver: WebDriver) -> list[str]:
+    print("Syncing review ids ...")
+    project_page = load_project_page(driver)
+    project_id = project_page.get_id()
+    project_data = project_page.get_data()
+    project_cache = ProjectCache(project_id)
+    project_cache.data = project_data
+    reviews = get_all_reviews(driver)
+    total, new = 0, 0
+    review_ids = []
+    for idx in tqdm(range(0, len(reviews))):
+        review = reviews[idx]
+        total += 1
+        review_data = review.get_data()
+        review_id = review_data["id"]
+        review_ids.append(review_id)
+        review_cache = ReviewCache(review_id)
+        if os.path.exists(review_cache.metadata_path):
+            review_cache.load_data()
+            _data = review_cache.data
+            _data.update(review_data)
+            review_cache.data = _data
+        else:
+            new += 1
+        project_cache.append_review(review_data)
+        review_cache.store_data()
+    project_cache.store_data()
+    print(
+        f"Data for project_{project_id} synced! ..."
+        f"\n\t... {new} of {total} reviews are new!"
+    )
+    return review_ids
 
 
 def sync_review_data(driver: WebDriver, review_id: str):
@@ -25,7 +67,7 @@ def sync_review_files(driver: WebDriver, review_id: str):
     print(f"Downoading files for review_{review_id}")
     project_page = ensure_project_page(driver)
     review = project_page.get_review(review_id)
-    print(f'found review {review.get_id()}')
+    print(f"found review {review.get_id()}")
     review_data = review.get_data()
     review_cache = ReviewCache(review_data["id"], data=review_data)
     csv = review.download_csv()
@@ -80,13 +122,13 @@ def sync_reviews(
     sync_files=False,
     sync_media=False,
     review_ids: Optional[list[str]] = None,
-    max_tries: int = 3
+    max_tries: int = 3,
 ):
     if not any([sync_data, sync_files, sync_media]):
         raise AttributeError("Must specify atleast one operation")
     project_page = ensure_project_page(driver)
     if review_ids is None:
-        review_ids = [review.get_id() for review in get_all_reviews(driver)]
+        review_ids = sync_project_data(driver)
     my_handle = driver.current_window_handle
     to_sync = review_ids[:]
     tries = collections.defaultdict(int)
@@ -105,6 +147,7 @@ def sync_reviews(
             except (SSCrawlerException, WebDriverException) as exc:
                 print(f"review_{review_id} errored with exception", exc)
                 import traceback
+
                 traceback.print_exc()
                 tries[review_id] += 1
                 if tries[review_id] < max_tries:
@@ -124,16 +167,17 @@ def sync_by_steps(
 ):
     if not any([sync_data, sync_files, sync_media]):
         raise AttributeError("Must specify atleast one operation")
+    review_ids = sync_project_data(driver)
     if sync_data:
-        sync_reviews(driver, sync_data=True)
+        sync_reviews(driver, sync_data=True, review_ids=review_ids)
     if sync_files:
-        sync_reviews(driver, sync_files=True)
+        sync_reviews(driver, sync_files=True, review_ids=review_ids)
     if sync_media:
-        sync_reviews(driver, sync_media=True)
+        sync_reviews(driver, sync_media=True, review_ids=review_ids)
 
 
-def sync_from_cache(driver: WebDriver):
-    cache = CacheAnalytics()
+def sync_from_cache(driver: WebDriver, refresh_ids=False):
+    cache = ProjectCache(get_project_id())
     cache_reviews = cache.get_reviews()
     cache.filter_reviews
     sync_reviews(
@@ -169,6 +213,6 @@ def sync_from_cache(driver: WebDriver):
 
 
 def complete_sync(driver):
-    sync_reviews(driver, sync_data=True)
-    sync_reviews(driver, sync_files=True)
+    sync_project_data(driver)
+    sync_reviews(driver, sync_data=True, sync_files=True)
     sync_from_cache(driver)

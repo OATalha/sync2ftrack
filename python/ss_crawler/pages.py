@@ -1,7 +1,7 @@
 from fnmatch import fnmatch
+from logging import getLogger
 import os
 import re
-import time
 from typing import Optional, Any
 import datetime
 
@@ -27,7 +27,7 @@ from ss_crawler.exceptions import (
 from ss_crawler.utils.credentials import get_credentials
 
 
-from .locators import (
+from ss_crawler.locators import (
     DownloadDialogLocators,
     MainPageLocators,
     LoginPageLocators,
@@ -39,7 +39,7 @@ from .locators import (
 )
 
 
-from .elements import (
+from ss_crawler.elements import (
     SimpleElement,
     SimpleSubPageElement,
     SubPageRootElement,
@@ -50,8 +50,11 @@ from .elements import (
 )
 
 
-from .utils.download_management import DownloadManager
-from .utils.filesize import FileSize
+from ss_crawler.utils.download_management import DownloadManager
+from ss_crawler.utils.filesize import FileSize
+
+
+logger = getLogger(__name__)
 
 
 class Page(object):
@@ -72,6 +75,7 @@ class Page(object):
 
     def refresh(self):
         url = get_credentials()["url"]
+        logger.info(f"Refreshing page {url}")
         self.driver.get(url)
         self.full_load = False
 
@@ -98,6 +102,7 @@ class Page(object):
             return currentScrollHeight != scroll_height
 
         try:
+            logger.debug(f"Waiting {wait}s for scrollHeightChanged")
             WebDriverWait(self.driver, wait).until(scrollHeightChanged)
         except TimeoutException:
             self.full_load = True
@@ -107,6 +112,7 @@ class Page(object):
         return True
 
     def scroll_to(self, height: int):
+        logger.debug(f"Scrolling to {height}")
         script = "arguments[0].scrollTo(0, arguments[1])"
         self.driver.execute_script(script, self.main_scroller, height)
         return self.scroll_top
@@ -125,7 +131,9 @@ class SubPage(Page):
     def move_mouse_to(self) -> bool:
         self.scroll_to_top()
         actions = ActionBuilder(self.driver)
-        actions.pointer_action.move_to_location(*self.get_mid_point())
+        mid_point = self.get_mid_point()
+        actions.pointer_action.move_to_location(*mid_point)
+        logger.debug(f"moving mouse pointer to {mid_point}")
         actions.perform()
         return True
 
@@ -173,6 +181,7 @@ class LoginPage(Page):
         return self.driver.title.strip() == "Log In"
 
     def login(self, email, password):
+        logger.info("Logging in")
         self.email_field.send_keys(email)
         self.continue_button.click()
         self.password_field.send_keys(password)
@@ -182,23 +191,49 @@ class LoginPage(Page):
 class ProjectPage(Page):
     workspace_title = WaitedElement(
         ProjectPageLocators.WORKSPACE_NAME,
+        wait=1,
         condition=presence_of_element_located,
     )
     project_title = WaitedElement(
-        ProjectPageLocators.PROJECT_NAME, condition=presence_of_element_located
+        ProjectPageLocators.PROJECT_NAME,
+        wait=5,
+        condition=presence_of_element_located
     )
     main_scroller = WaitedElement(ProjectPageLocators.MAIN_SCROLLER)
     reviews = WaitedElements(ProjectPageLocators.REVIEW)
+
+    url_re = r"(.*)/pro/#/project/(\d+)/?(reviews/(\d+))?"
+
+    def get_id(self) -> str:
+        url = self.driver.current_url
+        if match := re.match(self.url_re, url):
+            return match.group(2)
+        raise InvalidState("Cannot get id of project")
+
+    def get_project_title(self):
+        return self.project_title.text.strip()
+
+    def get_workspace_title(self):
+        return self.workspace_title.text.strip()
+
+    def get_data(self) -> dict[str, Any]:
+        return {
+            "workspace": self.get_workspace_title(),
+            "project": self.get_project_title(),
+            "id": self.get_id(),
+        }
 
     def verify(self) -> bool:
         return bool(self.project_title.text)
 
     def scroll_once(self, wait: int = 10) -> bool:
+        logger.info(f"Attempting scroll to bottom ...")
         scroll_height = int(self.main_scroller.get_attribute("scrollHeight"))
         self.scroll_to(scroll_height)
         return self.wait_until_scroll_height_changed(scroll_height, wait)
 
     def scroll_to_end(self, max_scrolls: Optional[int] = None, wait: int = 5):
+        logger.info(f"Scrolling {self.__class__.__name__} to end ...")
         counter = 0
         while self.scroll_once(wait):
             if max_scrolls is not None:
@@ -210,32 +245,21 @@ class ProjectPage(Page):
     def get_reviews(self) -> list["Review"]:
         return [Review(self, element) for element in self.reviews]
 
-    def get_review(
-        self, id: Optional[str] = None, name: Optional[str] = None
-    ) -> "Review":
-        if id is None and name is None:
-            raise TypeError("Please provide either 'id' or 'name'")
-        while True:
-            for review in self.get_reviews():
-                if id is not None:
-                    if fnmatch(review.get_id(), id):
-                        return review
-                elif name is not None:
-                    if fnmatch(review.get_name(), name):
-                        return review
-            if not self.scroll_once():
-                break
-        raise UnknownValue(f"Cannot find review for id: {id} and name: {name}")
+    def _get_review(self, review_id: str):
+        review_element = self.driver.find_element(
+            ProjectPageLocators.REVIEW_BY_ID[0],
+            ProjectPageLocators.REVIEW_BY_ID[1].format(review_id=review_id),
+        )
+        return Review(self, review_element)
 
-    def get_review2(self, id: str):
-        url = get_credentials()["url"]
-        url = os.path.join(url, "reviews", id)
-        print(f"refreshing page with review_{id}")
-        self.scroll_to_end()
-        self.driver.get(url)
-        for review in self.get_reviews():
-            if fnmatch(review.get_id(), id):
-                return review
+    def get_review(self, review_id: str) -> "Review":
+        logger.info(f"Getting review_{review_id}")
+        while True:
+            try:
+                return self._get_review(review_id)
+            except NoSuchElementException:
+                if not self.scroll_once():
+                    break
         raise UnknownValue(f"Cannot find review for id: {id}")
 
 
@@ -251,8 +275,8 @@ class Review(ProjectSubPage):
     download_button = WaitedSubPageElement(ReviewLocators.DL_BUTTON, 1)
     switch_button = WaitedSubPageElement(ReviewLocators.SWITCH_BUTTON)
     details_div = SimpleSubPageElement(ReviewLocators.DETAILS_DIV)
-    details_table = WaitedSubPageElement(ReviewLocators.DETAILS_TABLE)
-    details_grid = WaitedSubPageElement(ReviewLocators.DETAILS_GRID)
+    details_table = SimpleSubPageElement(ReviewLocators.DETAILS_TABLE)
+    details_grid = SimpleSubPageElement(ReviewLocators.DETAILS_GRID)
     review_items = WaitedSubPageElements(ReviewLocators.REVIEW_ITEM)
     item_count = SimpleSubPageElement(ReviewLocators.ITEM_COUNT)
 
@@ -271,15 +295,19 @@ class Review(ProjectSubPage):
     def get_item_count(self) -> int:
         return int(self.item_count.text)
 
+    def get_project_id(self):
+        return self.parent_page.get_id()
+
     def get_project_title(self):
-        return self.parent_page.project_title.text.strip()
+        return self.parent_page.get_project_title()
 
     def get_workspace_title(self):
-        return self.parent_page.workspace_title.text.strip()
+        return self.parent_page.get_workspace_title()
 
     def get_data(self):
         return {
             "id": self.get_id(),
+            "project_id": self.get_project_id(),
             "name": self.get_name(),
             "item_count": self.get_item_count(),
             "workspace": self.get_workspace_title(),
@@ -304,11 +332,12 @@ class Review(ProjectSubPage):
         if self.is_expanded():
             try:
                 return self.details_table.is_displayed()
-            except TimeoutException:
+            except NoSuchElementException:
                 return False
         return False
 
     def expand(self, wait: int = 1, max_tries: int = 10) -> bool:
+        logger.info(f"Expanding review_{self.get_id()}")
         self.scroll_to_top()
         attempts = 0
         while True:
@@ -334,7 +363,7 @@ class Review(ProjectSubPage):
                 return False
         return True
 
-    def show_details_table(self, wait: int = 1, max_tries: int = 5):
+    def show_details_table(self, wait: int = 1, max_tries: int = 10):
         self.expand()
         attempts = 0
         while True:
@@ -420,6 +449,9 @@ class ReviewItem(ProjectSubPage):
                 return match.group(1)
         raise InvalidState("Cannot get_id for review_item")
 
+    def get_project_id(self) -> str:
+        return self.parent_page.get_id()
+
     def get_review(self):
         return self.parent_page.get_review(self.get_id())
 
@@ -455,6 +487,7 @@ class ReviewItem(ProjectSubPage):
         return {
             "id": self.get_id(),
             "review_id": self.get_review_id(),
+            "project_id": self.get_project_id(),
             "order": self.get_order(),
             "name": self.get_name(),
             "views": self.get_views(),

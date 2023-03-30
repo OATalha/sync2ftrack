@@ -20,14 +20,23 @@ class LoginPageLocators(object):
 class ProjectPageLocators(object):
     MAIN_SCROLLER = (By.ID, "main")
     PROJECT_NAME = (By.CSS_SELECTOR, "div.headerName>span")
-    WORKSPACE_NAME = (By.CSS_SELECTOR,
-                      "div.headerTitle>div.headerTitle__content")
+    WORKSPACE_NAME = (
+        By.CSS_SELECTOR,
+        "div.headerTitle>div.headerTitle__content",
+    )
     REVIEWS_CONTAINER = (By.CSS_SELECTOR, "section.items>div.reviews")
-    REVIEW = (By.CSS_SELECTOR,
-              "div.infinite-list>div.review.infinite-list-item")
+    REVIEW = (
+        By.CSS_SELECTOR,
+        "div.infinite-list>div.review.infinite-list-item",
+    )
+    REVIEW_BY_ID = (
+        By.CSS_SELECTOR,
+        "div.infinite-list>div.review.infinite-list-item#review_{review_id}",
+    )
     SEARCH_FIELD = (
-            By.CSS_SELECTOR,
-            "div.filterInput>input[type='text'][placeholder~='Search']")
+        By.CSS_SELECTOR,
+        "div.filterInput>input[type='text'][placeholder~='Search']",
+    )
 
 
 class ReviewLocators(object):
@@ -43,23 +52,27 @@ class ReviewLocators(object):
 
 
 class ReviewItemLocators(object):
-    ORDER_CELL = (By.CSS_SELECTOR,
-                  "td.el-table__cell.handle-cell>div.cell>div")
+    ORDER_CELL = (
+        By.CSS_SELECTOR,
+        "td.el-table__cell.handle-cell>div.cell>div",
+    )
     NAME_CELL = (By.CSS_SELECTOR, "td.el-table__cell div.name-text")
-    UPLOADED_CELL = (By.CSS_SELECTOR,
-                     "td:nth-child(6).el-table__cell>div.cell")
-    BY_CELL = (By.CSS_SELECTOR,
-               "td:nth-child(7).el-table__cell>div.cell>div>a")
-    VIEWS_CELL = (By.CSS_SELECTOR,
-                  "td:nth-child(8).el-table__cell>div.cell")
-    NOTES_CELL = (By.CSS_SELECTOR,
-                  "td:nth-child(9).el-table__cell>div.cell>div")
-    SIZE_CELL = (By.CSS_SELECTOR,
-                 "td:nth-child(10).el-table__cell>div.cell")
-    TYPE_CELL = (By.CSS_SELECTOR,
-                 "td:nth-child(11).el-table__cell>div.cell")
-    DL_BUTTON = (By.CSS_SELECTOR,
-                 "td.el-table__cell button.ellipsis-button")
+    UPLOADED_CELL = (
+        By.CSS_SELECTOR,
+        "td:nth-child(6).el-table__cell>div.cell",
+    )
+    BY_CELL = (
+        By.CSS_SELECTOR,
+        "td:nth-child(7).el-table__cell>div.cell>div>a",
+    )
+    VIEWS_CELL = (By.CSS_SELECTOR, "td:nth-child(8).el-table__cell>div.cell")
+    NOTES_CELL = (
+        By.CSS_SELECTOR,
+        "td:nth-child(9).el-table__cell>div.cell>div",
+    )
+    SIZE_CELL = (By.CSS_SELECTOR, "td:nth-child(10).el-table__cell>div.cell")
+    TYPE_CELL = (By.CSS_SELECTOR, "td:nth-child(11).el-table__cell>div.cell")
+    DL_BUTTON = (By.CSS_SELECTOR, "td.el-table__cell button.ellipsis-button")
 
 
 class PopOverMenuLocators(object):
@@ -73,4 +86,3 @@ class DownloadDialogLocators(object):
     TITLE = (By.CSS_SELECTOR, "div.el-dialog__header>span.el-dialog__title")
     BODY = (By.CSS_SELECTOR, "div.el-dialog__body")
     DOWNLOAD_LINK = (By.CSS_SELECTOR, "div.el-dialog__body>div>div>a")
-

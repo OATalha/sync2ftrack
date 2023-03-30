@@ -357,7 +357,48 @@ class ReviewItemCache(ItemCache):
         return self.media_path
 
 
-class CacheAnalytics(Cache):
+class ProjectCache(ItemCache):
+    def __init__(
+        self, id: str, data: Optional[dict] = None, conf: Optional[str] = None
+    ):
+        super().__init__(id, data, conf)
+        self._reviews = []
+
+    @property
+    def reviews(self) -> list[dict]:
+        return self._reviews[:]
+
+    def clear_reviews(self):
+        self._reviews.clear()
+
+    def append_review(self, review_data):
+        self._reviews.append(review_data)
+
+    def load_data(self):
+        data = self._load_data()
+        if "reviews" in data:
+            self._reviews = data["reviews"]
+            del data["reviews"]
+        self._data = data
+        self._dirty = False
+
+    def store_data(self):
+        data = self._data.copy()
+        data["reviews"] = self.reviews
+        datafile = self._store_data(data)
+        self._dirty = False
+        return datafile
+
+    @property
+    def cache_dir(self):
+        return self.cache_base_dir
+
+    @property
+    def metadata_path(self):
+        return os.path.join(
+            self.cache_dir, f"project_{self._id}_metadata.json"
+        )
+
     def get_reviews(self) -> list[ReviewCache]:
         base_dir = self.cache_base_dir
         content = os.listdir(base_dir)
@@ -401,9 +442,7 @@ class CacheAnalytics(Cache):
             func = _get_review_prop
         return list(filter(func, reviews))  # type: ignore
 
-    def get_candidate_reviews(
-        self, top: int = 5
-    ) -> list[ReviewCache]:
+    def get_candidate_reviews(self, top: int = 5) -> list[ReviewCache]:
         reviews = self.filter_reviews(key="is_complete")
         reviews_ordered = sorted(
             reviews,
@@ -414,7 +453,7 @@ class CacheAnalytics(Cache):
 
 
 def print_analytics():
-    cache = CacheAnalytics()
+    cache = ProjectCache()
     reviews = cache.get_reviews()
     print(len(cache.get_reviews()))
     print(len(cache.filter_reviews(key="needs_data_sync", reviews=reviews)))
